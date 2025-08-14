@@ -3,7 +3,14 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(find:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(npm install)",
+      "Bash(timeout:*)",
+      "Bash(true)",
+      "Bash(node:*)",
+      "Bash(npm run optimize:*)"
     ],
     "deny": []
   }
