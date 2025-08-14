@@ -13,7 +13,7 @@ export default class StartCommand extends BaseCommand {
     async execute(interaction) {
         // Check if user already has intro
         const user = await this.db.query(
-            'SELECT intro_post_id FROM users WHERE id = $1',
+            'SELECT intro_post_id FROM users WHERE id = ?',
             [interaction.user.id]
         );
 

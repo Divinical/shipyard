@@ -9,6 +9,10 @@
     "dev": "nodemon index.js",
     "deploy-commands": "node scripts/deploy-commands.js",
     "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "backup": "node scripts/backup.js",
+    "health-check": "node scripts/health-check.js",
+    "optimize": "node scripts/optimize-database.js",
     "test": "jest"
   },
   "dependencies": {
@@ -17,12 +21,11 @@
     "dotenv": "^16.3.1",
     "moment-timezone": "^0.5.43",
     "node-cron": "^3.0.3",
-    "pg": "^8.11.3",
-    "sqlite3": "^5.1.7",
+    "better-sqlite3": "^9.2.2",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "eslint": "^9.0.0",
+    "eslint": "^8.55.0",
     "jest": "^29.7.0",
     "nodemon": "^3.0.2"
   },

@@ -46,7 +46,7 @@ export default class ActiveCommand extends BaseCommand {
     async checkActiveMemberStatus(userId) {
         // Check intro
         const userQuery = await this.db.query(
-            'SELECT intro_post_id, joined_at FROM users WHERE id = $1',
+            'SELECT intro_post_id, joined_at FROM users WHERE id = ?',
             [userId]
         );
         const hasIntro = userQuery.rows[0]?.intro_post_id != null;
@@ -58,8 +58,8 @@ export default class ActiveCommand extends BaseCommand {
         const meetQuery = await this.db.query(
             `SELECT COUNT(*) FROM meet_attendance ma
              JOIN meets m ON ma.meet_id = m.id
-             WHERE ma.user_id = $1 AND ma.attended = true
-             AND m.start_at >= $2`,
+             WHERE ma.user_id = ? AND ma.attended = 1
+             AND m.start_at >= ?`,
             [userId, thirtyDaysAgo]
         );
         const hasAttendedMeet = parseInt(meetQuery.rows[0].count) > 0;
@@ -71,13 +71,13 @@ export default class ActiveCommand extends BaseCommand {
         monthAgo.setMonth(monthAgo.getMonth() - 1);
 
         const messageQuery = await this.db.query(
-            'SELECT COUNT(*) FROM messages WHERE user_id = $1 AND created_at >= $2',
+            'SELECT COUNT(*) FROM messages WHERE user_id = ? AND created_at >= ?',
             [userId, weekAgo]
         );
         const weeklyMessages = parseInt(messageQuery.rows[0].count);
 
         const demoQuery = await this.db.query(
-            'SELECT COUNT(*) FROM demos WHERE author_id = $1 AND created_at >= $2',
+            'SELECT COUNT(*) FROM demos WHERE author_id = ? AND created_at >= ?',
             [userId, monthAgo]
         );
         const monthlyDemos = parseInt(demoQuery.rows[0].count);

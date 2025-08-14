@@ -39,3 +39,4 @@ export class MessageFormatter {
         return '█'.repeat(filled) + '░'.repeat(empty) + ` ${current}/${total}`;
     }
 }
+

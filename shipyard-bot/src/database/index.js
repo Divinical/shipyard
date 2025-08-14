@@ -1,42 +1,61 @@
 // src/database/index.js - Database Connection and Schema Management
-import sqlite3 from 'sqlite3';
+import Database from 'better-sqlite3';
 import { Logger } from '../utils/Logger.js';
+import path from 'path';
 
-const { Database: SQLiteDB } = sqlite3.verbose();
-
-export class Database {
+export class DatabaseConnection {
     constructor() {
         this.logger = new Logger();
         this.db = null;
+        this.preparedStatements = new Map();
     }
 
-    async connect() {
-        const dbPath = process.env.DATABASE_URL.replace('sqlite://', '');
-        
-        return new Promise((resolve, reject) => {
-            this.db = new SQLiteDB(dbPath, (err) => {
-                if (err) {
-                    this.logger.error('Database connection failed:', err);
-                    reject(err);
-                } else {
-                    this.logger.success('SQLite database connected successfully');
-                    resolve();
-                }
-            });
-        });
+    connect() {
+        try {
+            const dbPath = process.env.DATABASE_URL?.replace('sqlite://', '') || './shipyard.db';
+            const resolvedPath = path.resolve(dbPath);
+            
+            this.db = new Database(resolvedPath);
+            
+            // Apply comprehensive SQLite optimizations
+            this.applyOptimizations();
+            
+            this.logger.success('Better-SQLite3 database connected successfully');
+        } catch (error) {
+            this.logger.error('Database connection failed:', error);
+            throw error;
+        }
     }
 
     async runMigrations() {
         try {
+            // Import migrations first
             const { SQLITE_MIGRATIONS } = await import('./sqlite-schema.js');
             
-            // Create essential tables for SQLite
-            await SQLITE_MIGRATIONS.createUsersTable(this);
-            await SQLITE_MIGRATIONS.createMessagesTable(this);
-            await SQLITE_MIGRATIONS.createMeetsTable(this);
-            await SQLITE_MIGRATIONS.createGamificationTables(this);
-            await SQLITE_MIGRATIONS.createPoliciesTable(this);
+            // Run all migrations in a transaction
+            const migrationTransaction = this.db.transaction(() => {
+                // Create all tables
+                SQLITE_MIGRATIONS.createUsersTable(this);
+                SQLITE_MIGRATIONS.createMessagesTable(this);
+                SQLITE_MIGRATIONS.createMeetsTable(this);
+                SQLITE_MIGRATIONS.createClinicsTable(this);
+                SQLITE_MIGRATIONS.createHelpRequestsTable(this);
+                SQLITE_MIGRATIONS.createDemosTable(this);
+                SQLITE_MIGRATIONS.createKudosTable(this);
+                SQLITE_MIGRATIONS.createReportsTable(this);
+                SQLITE_MIGRATIONS.createConsentsTable(this);
+                SQLITE_MIGRATIONS.createAnalyticsSnapshotsTable(this);
+                SQLITE_MIGRATIONS.createGamificationTables(this);
+                SQLITE_MIGRATIONS.createPoliciesTable(this);
+                
+                // Create indexes
+                SQLITE_MIGRATIONS.createIndexes(this);
+                
+                // Apply optimizations and maintenance
+                SQLITE_MIGRATIONS.optimizePragmas(this);
+            });
             
+            migrationTransaction();
             this.logger.success('SQLite database migrations completed');
         } catch (error) {
             this.logger.error('Migration failed:', error);
@@ -44,329 +63,414 @@ export class Database {
         }
     }
 
-    async createUsersTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                timezone TEXT,
-                roles TEXT,
-                away_until DATETIME,
-                x_profile TEXT,
-                skills TEXT,
-                offer TEXT,
-                need TEXT,
-                intro_post_id TEXT,
-                last_activity_at DATETIME,
-                deleted_at DATETIME,
-                dm_open INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`;
-        await this.query(query);
-    }
-
-    async createMessagesTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                channel_id VARCHAR(255) NOT NULL,
-                message_id VARCHAR(255) UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                type VARCHAR(50) CHECK (type IN ('build_log', 'clinic_feedback', 'help_request', 'showcase', 'dock_check', 'other'))
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createMeetsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS meets (
-                id SERIAL PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                start_at TIMESTAMP NOT NULL,
-                duration_mins INTEGER DEFAULT 60,
-                rsvp_message_id VARCHAR(255),
-                notes_message_id VARCHAR(255),
-                status VARCHAR(20) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'closed', 'completed')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS meet_rsvps (
-                meet_id INTEGER REFERENCES meets(id) ON DELETE CASCADE,
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                status VARCHAR(10) CHECK (status IN ('yes', 'no', 'maybe')),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (meet_id, user_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS meet_attendance (
-                meet_id INTEGER REFERENCES meets(id) ON DELETE CASCADE,
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                attended BOOLEAN DEFAULT false,
-                reason VARCHAR(255),
-                PRIMARY KEY (meet_id, user_id)
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createClinicsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS clinics (
-                id SERIAL PRIMARY KEY,
-                author_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                message_id VARCHAR(255) UNIQUE,
-                goal TEXT,
-                draft TEXT,
-                questions TEXT[],
-                ask TEXT,
-                status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'solved')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                solved_at TIMESTAMP,
-                helpful_count INTEGER DEFAULT 0
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createHelpRequestsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS help_requests (
-                id SERIAL PRIMARY KEY,
-                author_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                message_id VARCHAR(255) UNIQUE,
-                category VARCHAR(100),
-                tags TEXT[],
-                summary TEXT,
-                urgency VARCHAR(20) DEFAULT 'normal',
-                status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'solved')),
-                solved_by VARCHAR(255) REFERENCES users(id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                solved_at TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createDemosTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS demos (
-                id SERIAL PRIMARY KEY,
-                author_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                message_id VARCHAR(255) UNIQUE,
-                week_key DATE,
-                in_queue BOOLEAN DEFAULT false,
-                showcased_at TIMESTAMP,
-                priority INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createKudosTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS kudos (
-                id SERIAL PRIMARY KEY,
-                giver_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                receiver_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                reason TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createPoliciesTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS policies (
-                key VARCHAR(255) PRIMARY KEY,
-                value JSONB NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            -- Insert default policies
-            INSERT INTO policies (key, value) VALUES
-                ('gamification.enabled', 'true'),
-                ('season.length_weeks', '6'),
-                ('weekly_goal.required_actions', '2'),
-                ('points.per_action', '1'),
-                ('points.max_per_week', '3'),
-                ('points.meet_attendance_bonus', '1'),
-                ('points.demo_presented_bonus', '1'),
-                ('leaderboard.public', 'false'),
-                ('nudge.quiet_days', '10'),
-                ('clinic.helpful_required', 'true'),
-                ('dock.time', '"09:00"'),
-                ('timezone', '"Europe/London"')
-            ON CONFLICT (key) DO NOTHING`;
-        await this.pool.query(query);
-    }
-
-    async createReportsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS reports (
-                id SERIAL PRIMARY KEY,
-                reporter_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                target_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                reason TEXT,
-                evidence_thread_id VARCHAR(255),
-                status VARCHAR(20) DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                resolved_at TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createConsentsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS consents (
-                id SERIAL PRIMARY KEY,
-                session_id VARCHAR(255) NOT NULL,
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                consent BOOLEAN DEFAULT false,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createAnalyticsTable() {
-        const query = `
-            CREATE TABLE IF NOT EXISTS analytics_snapshots (
-                id SERIAL PRIMARY KEY,
-                week_start DATE NOT NULL,
-                active_percent DECIMAL(5,2),
-                new_members INTEGER DEFAULT 0,
-                active_weeks_count INTEGER DEFAULT 0,
-                weekly_streak_leaders JSONB,
-                clinics_given INTEGER DEFAULT 0,
-                help_requests_solved INTEGER DEFAULT 0,
-                demos_posted INTEGER DEFAULT 0,
-                meet_attendance_rate DECIMAL(5,2),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )`;
-        await this.pool.query(query);
-    }
-
-    async createGamificationTables() {
-        const query = `
-            -- Seasons table
-            CREATE TABLE IF NOT EXISTS seasons (
-                id SERIAL PRIMARY KEY,
-                start_date DATE NOT NULL,
-                end_date DATE NOT NULL,
-                status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'active', 'closed')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            -- Scores table
-            CREATE TABLE IF NOT EXISTS scores (
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                season_id INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
-                points INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, season_id)
-            );
-
-            -- Actions log
-            CREATE TABLE IF NOT EXISTS actions_log (
-                id SERIAL PRIMARY KEY,
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                type VARCHAR(50) CHECK (type IN ('dock', 'meet_attend', 'demo_posted', 'demo_presented', 'clinic_helpful', 'help_solved')),
-                ref_message_id VARCHAR(255),
-                ref_user_id VARCHAR(255),
-                points INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                season_id INTEGER REFERENCES seasons(id),
-                week_key DATE
-            );
-
-            -- Streaks table
-            CREATE TABLE IF NOT EXISTS streaks (
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE PRIMARY KEY,
-                weekly_current INTEGER DEFAULT 0,
-                weekly_best INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_week_achieved DATE
-            );
-
-            -- Badges table
-            CREATE TABLE IF NOT EXISTS badges (
-                id SERIAL PRIMARY KEY,
-                code VARCHAR(50) UNIQUE NOT NULL,
-                label VARCHAR(255) NOT NULL,
-                description TEXT,
-                seasonal BOOLEAN DEFAULT false
-            );
-
-            -- User badges table
-            CREATE TABLE IF NOT EXISTS user_badges (
-                user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
-                badge_id INTEGER REFERENCES badges(id) ON DELETE CASCADE,
-                season_id INTEGER REFERENCES seasons(id),
-                awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, badge_id, COALESCE(season_id, 0))
-            );
-
-            -- Insert default badges
-            INSERT INTO badges (code, label, description, seasonal) VALUES
-                ('first_dock', 'First Dock', 'Posted your first Dock Check', false),
-                ('first_demo', 'First Demo', 'Posted your first demo', false),
-                ('clinic_helper_5', 'Clinic Helper', 'Gave 5 helpful feedback responses', false),
-                ('problem_solver_5', 'Problem Solver', 'Solved 5 help requests', false),
-                ('streak_4_weeks', '4 Week Streak', 'Maintained a 4-week activity streak', false),
-                ('meet_regular_4', 'Meet Regular', 'Attended 4 weekly meetings', false)
-            ON CONFLICT (code) DO NOTHING`;
-        await this.pool.query(query);
-    }
-
-    async query(text, params = []) {
-        return new Promise((resolve, reject) => {
-            if (text.trim().toUpperCase().startsWith('SELECT')) {
-                this.db.all(text, params, (err, rows) => {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve({ rows });
-                    }
-                });
-            } else {
-                this.db.run(text, params, function(err) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve({ 
-                            rows: [],
-                            lastID: this.lastID,
-                            changes: this.changes 
-                        });
-                    }
-                });
-            }
-        });
-    }
-
-    async transaction(callback) {
-        await this.query('BEGIN');
+    applyOptimizations() {
         try {
-            const result = await callback(this);
-            await this.query('COMMIT');
-            return result;
+            // Import and apply SQLite optimizations
+            const optimizations = [
+                'PRAGMA foreign_keys = ON',
+                'PRAGMA journal_mode = WAL',
+                'PRAGMA synchronous = NORMAL',
+                'PRAGMA cache_size = -32000', // 32MB cache
+                'PRAGMA mmap_size = 268435456', // 256MB memory-mapped I/O
+                'PRAGMA page_size = 4096',
+                'PRAGMA auto_vacuum = INCREMENTAL',
+                'PRAGMA temp_store = MEMORY',
+                'PRAGMA busy_timeout = 30000', // 30 second timeout
+                'PRAGMA optimize = 0x10002'
+            ];
+
+            for (const pragma of optimizations) {
+                try {
+                    this.db.pragma(pragma.replace('PRAGMA ', ''));
+                } catch (error) {
+                    this.logger.warn(`Failed to apply optimization: ${pragma}`, error.message);
+                }
+            }
         } catch (error) {
-            await this.query('ROLLBACK');
+            this.logger.warn('Failed to apply some optimizations:', error);
+        }
+    }
+
+    // Main query method - maintains backward compatibility with async interface
+    async query(text, params = []) {
+        return this.querySync(text, params);
+    }
+
+    // Synchronous query method with retry logic for better performance
+    querySync(text, params = [], retryCount = 0) {
+        const maxRetries = 3;
+        const retryDelayMs = 100;
+
+        try {
+            const trimmedQuery = text.trim().toUpperCase();
+            
+            if (trimmedQuery.startsWith('SELECT')) {
+                const stmt = this.db.prepare(text);
+                const rows = stmt.all(params);
+                return { rows };
+            } else if (trimmedQuery.startsWith('INSERT')) {
+                const stmt = this.db.prepare(text);
+                const result = stmt.run(params);
+                return { 
+                    rows: [], 
+                    lastID: result.lastInsertRowid,
+                    changes: result.changes 
+                };
+            } else if (trimmedQuery.startsWith('UPDATE') || trimmedQuery.startsWith('DELETE')) {
+                const stmt = this.db.prepare(text);
+                const result = stmt.run(params);
+                return { 
+                    rows: [], 
+                    changes: result.changes 
+                };
+            } else {
+                // For CREATE, DROP, etc.
+                const stmt = this.db.prepare(text);
+                stmt.run(params);
+                return { rows: [] };
+            }
+        } catch (error) {
+            // Retry logic for SQLITE_BUSY errors
+            if (error.code === 'SQLITE_BUSY' && retryCount < maxRetries) {
+                this.logger.warn(`Database busy, retrying (${retryCount + 1}/${maxRetries})...`);
+                
+                // Exponential backoff
+                const delay = retryDelayMs * Math.pow(2, retryCount);
+                this.sleep(delay);
+                
+                return this.querySync(text, params, retryCount + 1);
+            }
+            
+            this.logger.error('Query failed:', error, { query: text, params, retryCount });
             throw error;
         }
     }
 
-    async disconnect() {
-        if (this.db) {
-            return new Promise((resolve) => {
-                this.db.close((err) => {
-                    if (err) {
-                        this.logger.error('Error closing database:', err);
-                    } else {
-                        this.logger.info('SQLite database disconnected');
-                    }
-                    resolve();
-                });
+    // Helper method for sleep in retry logic
+    sleep(ms) {
+        const start = Date.now();
+        while (Date.now() - start < ms) {
+            // Busy wait for small delays
+        }
+    }
+
+    // Optimized prepared statement caching
+    prepare(query) {
+        if (!this.preparedStatements.has(query)) {
+            this.preparedStatements.set(query, this.db.prepare(query));
+        }
+        return this.preparedStatements.get(query);
+    }
+
+    // Transaction wrapper - maintains backward compatibility
+    async transaction(callback) {
+        return this.transactionSync(callback);
+    }
+
+    // Synchronous transaction for better performance
+    transactionSync(callback) {
+        const transaction = this.db.transaction((db) => {
+            return callback(this);
+        });
+        
+        return transaction();
+    }
+
+    // Helper method to get last insert ID (replaces RETURNING *)
+    getLastInsertId() {
+        const result = this.db.prepare('SELECT last_insert_rowid() as id').get();
+        return result.id;
+    }
+
+    // Helper method to format arrays as JSON strings
+    formatArray(arr) {
+        if (!Array.isArray(arr)) return arr;
+        return JSON.stringify(arr);
+    }
+
+    // Helper method to parse JSON strings back to arrays
+    parseArray(str) {
+        if (!str || typeof str !== 'string') return [];
+        try {
+            const parsed = JSON.parse(str);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            this.logger.warn('Failed to parse array from JSON:', str);
+            return [];
+        }
+    }
+
+    // Helper method to format objects as JSON strings
+    formatObject(obj) {
+        if (typeof obj !== 'object' || obj === null) return obj;
+        return JSON.stringify(obj);
+    }
+
+    // Helper method to parse JSON strings back to objects
+    parseObject(str) {
+        if (!str || typeof str !== 'string') return null;
+        try {
+            return JSON.parse(str);
+        } catch (error) {
+            this.logger.warn('Failed to parse object from JSON:', str);
+            return null;
+        }
+    }
+
+    // Helper method for SQLite date handling
+    formatDate(date) {
+        if (!date) return null;
+        if (date instanceof Date) {
+            return date.toISOString();
+        }
+        return date;
+    }
+
+    // Batch operations for better performance
+    insertMany(table, columns, rows) {
+        const placeholders = columns.map(() => '?').join(', ');
+        const query = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
+        const stmt = this.prepare(query);
+        
+        const insertMany = this.db.transaction((rows) => {
+            for (const row of rows) {
+                stmt.run(row);
+            }
+        });
+        
+        return insertMany(rows);
+    }
+
+    // Batch SELECT operations to reduce N+1 queries
+    selectMany(table, column, values, additionalColumns = '*') {
+        if (!values || values.length === 0) return { rows: [] };
+        
+        const placeholders = values.map(() => '?').join(', ');
+        const query = `SELECT ${additionalColumns} FROM ${table} WHERE ${column} IN (${placeholders})`;
+        
+        return this.querySync(query, values);
+    }
+
+    // Batch user lookups - common operation
+    batchGetUsers(userIds) {
+        if (!userIds || userIds.length === 0) return { rows: [] };
+        
+        return this.selectMany('users', 'id', userIds);
+    }
+
+    // Batch message lookups
+    batchGetMessages(messageIds) {
+        if (!messageIds || messageIds.length === 0) return { rows: [] };
+        
+        return this.selectMany('messages', 'message_id', messageIds);
+    }
+
+    // Get user scores for leaderboard efficiently
+    getLeaderboard(seasonId, limit = 10) {
+        const query = `
+            SELECT s.user_id, s.points, u.username
+            FROM scores s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.season_id = ? AND u.deleted_at IS NULL
+            ORDER BY s.points DESC, s.updated_at ASC
+            LIMIT ?
+        `;
+        
+        return this.querySync(query, [seasonId, limit]);
+    }
+
+    // Get user actions efficiently with JOINs
+    getUserActionsWithDetails(userId, seasonId, limit = 50) {
+        const query = `
+            SELECT 
+                al.type,
+                al.points,
+                al.created_at,
+                al.week_key,
+                u2.username as ref_user_name
+            FROM actions_log al
+            LEFT JOIN users u2 ON al.ref_user_id = u2.id
+            WHERE al.user_id = ? AND al.season_id = ?
+            ORDER BY al.created_at DESC
+            LIMIT ?
+        `;
+        
+        return this.querySync(query, [userId, seasonId, limit]);
+    }
+
+    // Efficient clinic statistics
+    getClinicStats(authorId = null, days = 30) {
+        const dateLimit = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        
+        let query = `
+            SELECT 
+                c.status,
+                COUNT(*) as count,
+                AVG(c.helpful_count) as avg_helpful_count
+            FROM clinics c
+            WHERE c.created_at >= ?
+        `;
+        
+        let params = [dateLimit];
+        
+        if (authorId) {
+            query += ' AND c.author_id = ?';
+            params.push(authorId);
+        }
+        
+        query += ' GROUP BY c.status';
+        
+        return this.querySync(query, params);
+    }
+
+    // Efficient meet attendance tracking
+    getMeetAttendanceStats(userId = null, months = 3) {
+        const dateLimit = new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000).toISOString();
+        
+        let query = `
+            SELECT 
+                m.title,
+                m.start_at,
+                ma.attended,
+                COUNT(ma2.user_id) as total_attendees
+            FROM meets m
+            LEFT JOIN meet_attendance ma ON m.id = ma.meet_id
+            LEFT JOIN meet_attendance ma2 ON m.id = ma2.meet_id AND ma2.attended = 1
+            WHERE m.start_at >= ?
+        `;
+        
+        let params = [dateLimit];
+        
+        if (userId) {
+            query += ' AND ma.user_id = ?';
+            params.push(userId);
+        }
+        
+        query += ' GROUP BY m.id ORDER BY m.start_at DESC';
+        
+        return this.querySync(query, params);
+    }
+
+    // Database health check
+    healthCheck() {
+        try {
+            const result = this.db.prepare('SELECT 1 as healthy').get();
+            return result.healthy === 1;
+        } catch (error) {
+            this.logger.error('Health check failed:', error);
+            return false;
+        }
+    }
+
+    // Get database statistics
+    getStats() {
+        try {
+            const stats = {};
+            
+            // Get table counts
+            const tables = this.db.prepare(`
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name
+            `).all();
+            
+            for (const table of tables) {
+                const count = this.db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get();
+                stats[table.name] = count.count;
+            }
+            
+            // Get database size
+            const size = this.db.prepare('PRAGMA page_count').get();
+            const pageSize = this.db.prepare('PRAGMA page_size').get();
+            stats.database_size_bytes = size.page_count * pageSize.page_size;
+            
+            return stats;
+        } catch (error) {
+            this.logger.error('Failed to get database stats:', error);
+            return {};
+        }
+    }
+
+    // Run maintenance tasks for optimal performance
+    runMaintenance() {
+        try {
+            this.logger.info('Running database maintenance...');
+            
+            // Import maintenance tasks from schema
+            import('./sqlite-schema.js').then(({ SQLITE_MIGRATIONS }) => {
+                SQLITE_MIGRATIONS.scheduleMaintenanceTasks(this);
             });
+            
+            // Additional maintenance
+            this.db.pragma('analysis_limit = 1000');
+            this.db.pragma('optimize');
+            
+            this.logger.success('Database maintenance completed');
+        } catch (error) {
+            this.logger.error('Database maintenance failed:', error);
+        }
+    }
+
+    // Get detailed performance statistics
+    getPerformanceStats() {
+        try {
+            const stats = {};
+            
+            // Get cache hit ratio
+            const cacheStats = this.db.pragma('cache_size');
+            stats.cache_size = cacheStats;
+            
+            // Get journal mode
+            const journalMode = this.db.pragma('journal_mode');
+            stats.journal_mode = journalMode;
+            
+            // Get WAL checkpoint info
+            try {
+                const walInfo = this.db.pragma('wal_checkpoint(PASSIVE)');
+                stats.wal_checkpoint = walInfo;
+            } catch (e) {
+                // WAL not enabled
+                stats.wal_checkpoint = 'N/A';
+            }
+            
+            // Get query analysis
+            const queryPlan = this.db.prepare('EXPLAIN QUERY PLAN SELECT COUNT(*) FROM users').all();
+            stats.sample_query_plan = queryPlan;
+            
+            return stats;
+        } catch (error) {
+            this.logger.error('Failed to get performance stats:', error);
+            return {};
+        }
+    }
+
+    disconnect() {
+        if (this.db) {
+            try {
+                // Clear prepared statements cache
+                this.preparedStatements.clear();
+                
+                // Close database connection
+                this.db.close();
+                this.db = null;
+                
+                this.logger.info('Better-SQLite3 database disconnected');
+            } catch (error) {
+                this.logger.error('Error closing database:', error);
+            }
         }
     }
 }
+
+// Export singleton instance for backward compatibility
+let dbInstance = null;
+
+export function getDatabase() {
+    if (!dbInstance) {
+        dbInstance = new DatabaseConnection();
+    }
+    return dbInstance;
+}
+
+// Export class as default for direct instantiation
+export { DatabaseConnection as Database };

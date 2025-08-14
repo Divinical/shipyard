@@ -29,8 +29,8 @@ export default class ClinicCommand extends BaseCommand {
         
         const helpfulCount = await this.db.query(
             `SELECT COUNT(*) FROM actions_log 
-             WHERE user_id = $1 AND type = 'clinic_helpful' 
-             AND created_at >= $2`,
+             WHERE user_id = ? AND type = 'clinic_helpful' 
+             AND created_at >= ?`,
             [interaction.user.id, twoWeeksAgo]
         );
 

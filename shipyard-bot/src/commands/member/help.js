@@ -64,12 +64,11 @@ export default class HelpCommand extends BaseCommand {
         // Create help request in database
         const result = await this.db.query(
             `INSERT INTO help_requests (author_id, category, tags, summary, urgency, status)
-             VALUES ($1, $2, $3, $4, $5, 'open')
-             RETURNING id`,
-            [interaction.user.id, category, tags, summary, urgency]
+             VALUES (?, ?, ?, ?, ?, 'open')`,
+            [interaction.user.id, category, JSON.stringify(tags), summary, urgency]
         );
 
-        const requestId = result.rows[0].id;
+        const requestId = result.lastID;
 
         // Create embed
         const urgencyColors = {
@@ -116,7 +115,7 @@ export default class HelpCommand extends BaseCommand {
 
         // Update database with message ID
         await this.db.query(
-            'UPDATE help_requests SET message_id = $1 WHERE id = $2',
+            'UPDATE help_requests SET message_id = ? WHERE id = ?',
             [message.id, requestId]
         );
 

@@ -7,6 +7,11 @@ import { EventHandler } from './src/handlers/EventHandler.js';
 import { CronManager } from './src/services/CronManager.js';
 import { Logger } from './src/utils/Logger.js';
 import { PolicyManager } from './src/services/PolicyManager.js';
+import { GamificationService } from './src/services/GamificationService.js';
+import { ModerationService } from './src/services/ModerationService.js';
+import { OnboardingService } from './src/services/OnboardingService.js';
+import { MeetService } from './src/services/MeetService.js';
+import { AnalyticsService } from './src/services/AnalyticsService.js';
 
 config();
 
@@ -30,6 +35,7 @@ class ShipYardBot {
         this.db = null;
         this.policyManager = null;
         this.cronManager = null;
+        this.services = {};
     }
 
     async initialize() {
@@ -41,8 +47,18 @@ class ShipYardBot {
             await this.db.runMigrations();
             
             // Initialize policy manager
-            this.policyManager = new PolicyManager(this.db, this.logger);
+            this.policyManager = new PolicyManager(this.db);
             await this.policyManager.loadPolicies();
+            
+            // Initialize services
+            this.logger.info('Initializing services...');
+            this.services = {
+                gamification: new GamificationService(this),
+                moderation: new ModerationService(this),
+                onboarding: new OnboardingService(this),
+                meet: new MeetService(this),
+                analytics: new AnalyticsService(this)
+            };
             
             // Initialize handlers
             this.commandHandler = new CommandHandler(this);

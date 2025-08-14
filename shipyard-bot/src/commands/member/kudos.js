@@ -37,7 +37,7 @@ export default class KudosCommand extends BaseCommand {
 
         // Save kudos
         await this.db.query(
-            'INSERT INTO kudos (giver_id, receiver_id, reason, created_at) VALUES ($1, $2, $3, $4)',
+            'INSERT INTO kudos (giver_id, receiver_id, reason, created_at) VALUES (?, ?, ?, ?)',
             [interaction.user.id, targetUser.id, reason, new Date()]
         );
 
@@ -62,7 +62,7 @@ export default class KudosCommand extends BaseCommand {
         weekStart.setHours(0, 0, 0, 0);
 
         const kudosCount = await this.db.query(
-            'SELECT COUNT(*) FROM kudos WHERE receiver_id = $1 AND created_at >= $2',
+            'SELECT COUNT(*) FROM kudos WHERE receiver_id = ? AND created_at >= ?',
             [userId, weekStart]
         );
 

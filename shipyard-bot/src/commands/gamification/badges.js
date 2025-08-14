@@ -18,7 +18,7 @@ export default class BadgesCommand extends BaseCommand {
             `SELECT b.code, b.label, b.description, ub.awarded_at
              FROM user_badges ub
              JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = $1
+             WHERE ub.user_id = ?
              ORDER BY ub.awarded_at DESC`,
             [userId]
         );
@@ -80,7 +80,7 @@ export default class BadgesCommand extends BaseCommand {
         const counts = await this.db.query(
             `SELECT type, COUNT(*) as count
              FROM actions_log
-             WHERE user_id = $1
+             WHERE user_id = ?
              GROUP BY type`,
             [userId]
         );
@@ -94,7 +94,7 @@ export default class BadgesCommand extends BaseCommand {
         const earnedBadges = await this.db.query(
             `SELECT b.code FROM user_badges ub
              JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = $1`,
+             WHERE ub.user_id = ?`,
             [userId]
         );
 

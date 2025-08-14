@@ -1,17 +1,37 @@
 // src/handlers/EventHandler.js
-import { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { readdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export class EventHandler {
     constructor(bot) {
         this.bot = bot;
-        this.setupEvents();
     }
 
     async loadEvents() {
-        this.bot.logger.info('Events loaded and listening');
+        const eventsPath = join(__dirname, '../events');
+        const eventFiles = readdirSync(eventsPath).filter(file => file.endsWith('.js'));
+
+        for (const file of eventFiles) {
+            const filePath = join(eventsPath, file);
+            const { default: event } = await import(`file://${filePath}`);
+            
+            if (event.once) {
+                this.bot.client.once(event.name, (...args) => event.execute(...args, this.bot));
+            } else {
+                this.bot.client.on(event.name, (...args) => event.execute(...args, this.bot));
+            }
+            
+            this.bot.logger.info(`Loaded event: ${event.name}`);
+        }
+        
+        this.bot.logger.success(`Loaded ${eventFiles.length} events`);
     }
 
-    setupEvents() {
+    // Keep the centralized event handlers as fallback
+    setupEventsOld() {
         // Bot ready event
         this.bot.client.once(Events.ClientReady, () => this.onReady());
         
@@ -68,10 +88,8 @@ export class EventHandler {
 
             // Create user record
             await this.bot.db.query(
-                `INSERT INTO users (id, username, joined_at) 
-                 VALUES ($1, $2, $3) 
-                 ON CONFLICT (id) DO UPDATE 
-                 SET username = $2, joined_at = $3`,
+                `INSERT OR REPLACE INTO users (id, username, joined_at) 
+                 VALUES (?, ?, ?)`,
                 [member.id, member.user.username, new Date()]
             );
 
@@ -87,7 +105,7 @@ export class EventHandler {
         try {
             // Log member departure
             await this.bot.db.query(
-                'UPDATE users SET deleted_at = $1 WHERE id = $2',
+                'UPDATE users SET deleted_at = ? WHERE id = ?',
                 [new Date(), member.id]
             );
 
@@ -112,7 +130,7 @@ export class EventHandler {
         try {
             // Update last activity
             await this.bot.db.query(
-                'UPDATE users SET last_activity_at = $1 WHERE id = $2',
+                'UPDATE users SET last_activity_at = ? WHERE id = ?',
                 [new Date(), message.author.id]
             );
 
@@ -120,7 +138,7 @@ export class EventHandler {
             const messageType = this.getMessageType(message.channel.id);
             await this.bot.db.query(
                 `INSERT INTO messages (user_id, channel_id, message_id, type, created_at)
-                 VALUES ($1, $2, $3, $4, $5)`,
+                 VALUES (?, ?, ?, ?, ?)`,
                 [message.author.id, message.channel.id, message.id, messageType, new Date()]
             );
 
@@ -233,9 +251,9 @@ export class EventHandler {
         // Update user record
         await this.bot.db.query(
             `UPDATE users 
-             SET timezone = $1, skills = $2, intro_post_id = $3, offer = $4, need = $5
-             WHERE id = $6`,
-            [timezone, skills, introMessage.id, '', '', interaction.user.id]
+             SET timezone = ?, skills = ?, intro_post_id = ?, offer = ?, need = ?
+             WHERE id = ?`,
+            [timezone, this.db.formatArray(skills), introMessage.id, '', '', interaction.user.id]
         );
 
         // Add Member role
@@ -252,10 +270,8 @@ export class EventHandler {
 
     async handleRSVP(interaction, meetId, response) {
         await this.bot.db.query(
-            `INSERT INTO meet_rsvps (meet_id, user_id, status, updated_at)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (meet_id, user_id) 
-             DO UPDATE SET status = $3, updated_at = $4`,
+            `INSERT OR REPLACE INTO meet_rsvps (meet_id, user_id, status, updated_at)
+             VALUES (?, ?, ?, ?)`,
             [meetId, interaction.user.id, response, new Date()]
         );
 
@@ -267,7 +283,7 @@ export class EventHandler {
 
     async markAsSolved(interaction, requestId) {
         const result = await this.bot.db.query(
-            'SELECT author_id FROM help_requests WHERE id = $1',
+            'SELECT author_id FROM help_requests WHERE id = ?',
             [requestId]
         );
 
@@ -279,7 +295,7 @@ export class EventHandler {
         }
 
         await this.bot.db.query(
-            'UPDATE help_requests SET status = $1, solved_at = $2 WHERE id = $3',
+            'UPDATE help_requests SET status = ?, solved_at = ? WHERE id = ?',
             ['solved', new Date(), requestId]
         );
 
@@ -300,7 +316,7 @@ export class EventHandler {
 
     async markAsHelpful(interaction, clinicId) {
         await this.bot.db.query(
-            'UPDATE clinics SET helpful_count = helpful_count + 1 WHERE id = $1',
+            'UPDATE clinics SET helpful_count = helpful_count + 1 WHERE id = ?',
             [clinicId]
         );
 
@@ -323,18 +339,16 @@ export class EventHandler {
         // Log the action
         await this.bot.db.query(
             `INSERT INTO actions_log (user_id, type, ref_message_id, points, season_id, week_key)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [userId, type, refId, points, seasonId, this.getCurrentWeekKey()]
         );
 
         // Update season score
         if (seasonId) {
             await this.bot.db.query(
-                `INSERT INTO scores (user_id, season_id, points)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (user_id, season_id)
-                 DO UPDATE SET points = scores.points + $3, updated_at = NOW()`,
-                [userId, seasonId, points]
+                `INSERT OR REPLACE INTO scores (user_id, season_id, points, updated_at)
+                 VALUES (?, ?, COALESCE((SELECT points FROM scores WHERE user_id = ? AND season_id = ?), 0) + ?, datetime('now'))`,
+                [userId, seasonId, userId, seasonId, points]
             );
         }
     }
@@ -346,8 +360,8 @@ export class EventHandler {
         
         const existing = await this.bot.db.query(
             `SELECT id FROM actions_log 
-             WHERE user_id = $1 AND type = 'dock' 
-             AND created_at >= $2`,
+             WHERE user_id = ? AND type = 'dock' 
+             AND created_at >= ?`,
             [userId, today]
         );
 
@@ -425,7 +439,7 @@ export class EventHandler {
     async checkRecentJoins(guild) {
         const oneMinuteAgo = new Date(Date.now() - 60000);
         const result = await this.bot.db.query(
-            'SELECT COUNT(*) FROM users WHERE joined_at > $1',
+            'SELECT COUNT(*) FROM users WHERE joined_at > ?',
             [oneMinuteAgo]
         );
         return parseInt(result.rows[0].count);
@@ -496,7 +510,7 @@ export class EventHandler {
             reaction.message.channel.id === process.env.CLINIC_CHANNEL_ID) {
             
             const clinicResult = await this.bot.db.query(
-                'SELECT id, author_id FROM clinics WHERE message_id = $1',
+                'SELECT id, author_id FROM clinics WHERE message_id = ?',
                 [reaction.message.id]
             );
 

@@ -21,14 +21,14 @@ export default class RankCommand extends BaseCommand {
         const actionsQuery = await this.db.query(
             `SELECT type, COUNT(*) as count, SUM(points) as total_points
              FROM actions_log
-             WHERE user_id = $1 AND created_at >= $2 AND created_at <= $3
+             WHERE user_id = ? AND created_at >= ? AND created_at <= ?
              GROUP BY type`,
             [userId, weekStart, weekEnd]
         );
 
         // Get user's streak
         const streakQuery = await this.db.query(
-            'SELECT weekly_current, weekly_best FROM streaks WHERE user_id = $1',
+            'SELECT weekly_current, weekly_best FROM streaks WHERE user_id = ?',
             [userId]
         );
 
@@ -36,7 +36,7 @@ export default class RankCommand extends BaseCommand {
         const seasonQuery = await this.db.query(
             `SELECT s.points FROM scores s
              JOIN seasons se ON s.season_id = se.id
-             WHERE s.user_id = $1 AND se.status = 'active'`,
+             WHERE s.user_id = ? AND se.status = 'active'`,
             [userId]
         );
 

@@ -93,12 +93,11 @@ export default class MeetCommand extends BaseCommand {
         // Create meet in database
         const result = await this.db.query(
             `INSERT INTO meets (title, start_at, duration_mins, status)
-             VALUES ($1, $2, $3, 'scheduled')
-             RETURNING id`,
+             VALUES (?, ?, ?, 'scheduled')`,
             [title, meetTime.toDate(), duration]
         );
 
-        const meetId = result.rows[0].id;
+        const meetId = result.lastID;
 
         // Create RSVP embed
         const embed = new EmbedBuilder()
@@ -145,7 +144,7 @@ export default class MeetCommand extends BaseCommand {
 
         // Update meet with RSVP message ID
         await this.db.query(
-            'UPDATE meets SET rsvp_message_id = $1 WHERE id = $2',
+            'UPDATE meets SET rsvp_message_id = ? WHERE id = ?',
             [message.id, meetId]
         );
 
@@ -160,7 +159,7 @@ export default class MeetCommand extends BaseCommand {
 
         // Update status
         await this.db.query(
-            "UPDATE meets SET status = 'closed' WHERE id = $1",
+            "UPDATE meets SET status = 'closed' WHERE id = ?",
             [meetId]
         );
 
@@ -168,7 +167,7 @@ export default class MeetCommand extends BaseCommand {
         const rsvps = await this.db.query(
             `SELECT status, COUNT(*) as count
              FROM meet_rsvps
-             WHERE meet_id = $1
+             WHERE meet_id = ?
              GROUP BY status`,
             [meetId]
         );
@@ -200,7 +199,7 @@ export default class MeetCommand extends BaseCommand {
             `SELECT u.id, u.username, r.status
              FROM meet_rsvps r
              JOIN users u ON r.user_id = u.id
-             WHERE r.meet_id = $1 AND r.status IN ('yes', 'maybe')
+             WHERE r.meet_id = ? AND r.status IN ('yes', 'maybe')
              ORDER BY u.username`,
             [meetId]
         );
@@ -244,7 +243,7 @@ export default class MeetCommand extends BaseCommand {
         const meets = await this.db.query(
             `SELECT id, title, start_at, duration_mins, status
              FROM meets
-             WHERE start_at > NOW()
+             WHERE start_at > datetime('now')
              ORDER BY start_at
              LIMIT 5`
         );
@@ -287,16 +286,16 @@ export default class MeetCommand extends BaseCommand {
         // Get users who haven't responded or said maybe
         const nonResponders = await this.db.query(
             `SELECT u.id FROM users u
-             WHERE u.away_until IS NULL OR u.away_until < NOW()
+             WHERE u.away_until IS NULL OR u.away_until < datetime('now')
              AND u.id NOT IN (
                 SELECT user_id FROM meet_rsvps 
-                WHERE meet_id = $1 AND status = 'yes'
+                WHERE meet_id = ? AND status = 'yes'
              )`,
             [meetId]
         );
 
         const meet = await this.db.query(
-            'SELECT title, start_at FROM meets WHERE id = $1',
+            'SELECT title, start_at FROM meets WHERE id = ?',
             [meetId]
         );
 

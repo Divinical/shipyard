@@ -1,6 +1,6 @@
 // src/handlers/CommandHandler.js
 import { Collection } from 'discord.js';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,25 +17,16 @@ export class CommandHandler {
         const commandCategories = readdirSync(commandsPath);
 
         for (const category of commandCategories) {
-            // Skip if it's a file (like BaseCommand.js)
             const categoryPath = join(commandsPath, category);
-            if (!statSync(categoryPath).isDirectory()) {
-                continue;
-            }
-
             const commandFiles = readdirSync(categoryPath).filter(file => file.endsWith('.js'));
 
             for (const file of commandFiles) {
                 const filePath = join(categoryPath, file);
-                try {
-                    const { default: Command } = await import(`file://${filePath}`);
-                    const command = new Command(this.bot);
-                    
-                    this.commands.set(command.data.name, command);
-                    this.bot.logger.info(`Loaded command: ${command.data.name}`);
-                } catch (error) {
-                    this.bot.logger.error(`Failed to load command ${file}:`, error);
-                }
+                const { default: Command } = await import(`file://${filePath}`);
+                const command = new Command(this.bot);
+                
+                this.commands.set(command.data.name, command);
+                this.bot.logger.info(`Loaded command: ${command.data.name}`);
             }
         }
     }

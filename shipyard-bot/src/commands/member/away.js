@@ -42,7 +42,7 @@ export default class AwayCommand extends BaseCommand {
             awayUntil.setDate(awayUntil.getDate() + days);
 
             await this.db.query(
-                'UPDATE users SET away_until = $1 WHERE id = $2',
+                'UPDATE users SET away_until = ? WHERE id = ?',
                 [awayUntil, userId]
             );
 
@@ -60,7 +60,7 @@ export default class AwayCommand extends BaseCommand {
 
         } else if (subcommand === 'clear') {
             await this.db.query(
-                'UPDATE users SET away_until = NULL WHERE id = $1',
+                'UPDATE users SET away_until = NULL WHERE id = ?',
                 [userId]
             );
 

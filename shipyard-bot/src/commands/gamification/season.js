@@ -28,7 +28,7 @@ export default class SeasonCommand extends BaseCommand {
 
         // Get user's season stats
         const userScore = await this.db.query(
-            'SELECT points FROM scores WHERE user_id = $1 AND season_id = $2',
+            'SELECT points FROM scores WHERE user_id = ? AND season_id = ?',
             [userId, currentSeason.id]
         );
 
@@ -37,7 +37,7 @@ export default class SeasonCommand extends BaseCommand {
             `SELECT u.username, s.points
              FROM scores s
              JOIN users u ON s.user_id = u.id
-             WHERE s.season_id = $1
+             WHERE s.season_id = ?
              ORDER BY s.points DESC
              LIMIT 5`,
             [currentSeason.id]

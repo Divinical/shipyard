@@ -45,7 +45,7 @@ export class ModerationService {
             
             // Store original permissions
             await this.db.query(
-                'INSERT INTO policies (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+                'INSERT OR REPLACE INTO policies (key, value) VALUES (?, ?)',
                 ['raid.original_permissions', JSON.stringify(currentPerms)]
             );
             
@@ -70,12 +70,12 @@ export class ModerationService {
         try {
             // Restore original permissions
             const result = await this.db.query(
-                'SELECT value FROM policies WHERE key = $1',
+                'SELECT value FROM policies WHERE key = ?',
                 ['raid.original_permissions']
             );
             
-            if (result.rows.length > 0) {
-                const originalPerms = result.rows[0].value;
+            if (result) {
+                const originalPerms = result.value;
                 const everyoneRole = guild.roles.everyone;
                 await everyoneRole.setPermissions(originalPerms);
             }
@@ -196,19 +196,19 @@ export class ModerationService {
         // Store warning in database
         await this.db.query(
             `INSERT INTO reports (reporter_id, target_id, reason, created_at)
-             VALUES ('SYSTEM', $1, $2, $3)`,
+             VALUES ('SYSTEM', ?, ?, ?)`,
             [userId, `Auto-warning: ${type} - ${reason}`, new Date()]
         );
         
         // Check warning count
         const warningCount = await this.db.query(
-            `SELECT COUNT(*) FROM reports 
-             WHERE target_id = $1 AND reporter_id = 'SYSTEM'
-             AND created_at > NOW() - INTERVAL '7 days'`,
+            `SELECT COUNT(*) as count FROM reports 
+             WHERE target_id = ? AND reporter_id = 'SYSTEM'
+             AND created_at > datetime('now', '-7 days')`,
             [userId]
         );
         
-        const count = parseInt(warningCount.rows[0].count);
+        const count = parseInt(warningCount.count);
         
         // Escalate if too many warnings
         if (count >= 3) {
@@ -220,12 +220,11 @@ export class ModerationService {
         // Create report in database
         const result = await this.db.query(
             `INSERT INTO reports (reporter_id, target_id, reason, created_at)
-             VALUES ($1, $2, $3, $4)
-             RETURNING id`,
+             VALUES (?, ?, ?, ?)`,
             [reporterId, targetId, reason, new Date()]
         );
         
-        const reportId = result.rows[0].id;
+        const reportId = result.lastID;
         
         // Create evidence thread in mod room
         const modChannel = this.bot.client.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
@@ -239,7 +238,7 @@ export class ModerationService {
         
         // Update report with thread ID
         await this.db.query(
-            'UPDATE reports SET evidence_thread_id = $1 WHERE id = $2',
+            'UPDATE reports SET evidence_thread_id = ? WHERE id = ?',
             [thread.id, reportId]
         );
         
@@ -324,12 +323,12 @@ export class ModerationService {
         
         // Get user info
         const userInfo = await this.db.query(
-            'SELECT * FROM users WHERE id = $1',
+            'SELECT * FROM users WHERE id = ?',
             [targetId]
         );
         
-        if (userInfo.rows.length > 0) {
-            const user = userInfo.rows[0];
+        if (userInfo) {
+            const user = userInfo;
             const joinDate = new Date(user.joined_at).toLocaleDateString();
             const lastActivity = new Date(user.last_activity_at).toLocaleDateString();
             
@@ -344,13 +343,13 @@ export class ModerationService {
         
         // Get previous reports
         const previousReports = await this.db.query(
-            'SELECT * FROM reports WHERE target_id = $1 AND id != $2 ORDER BY created_at DESC LIMIT 5',
+            'SELECT * FROM reports WHERE target_id = ? AND id != ? ORDER BY created_at DESC LIMIT 5',
             [targetId, thread.name.match(/\d+/)[0]]
         );
         
-        if (previousReports.rows.length > 0) {
+        if (previousReports && previousReports.length > 0) {
             let reportHistory = '**Previous Reports:**\n';
-            for (const report of previousReports.rows) {
+            for (const report of previousReports) {
                 reportHistory += `• ${new Date(report.created_at).toLocaleDateString()}: ${report.reason}\n`;
             }
             await thread.send(reportHistory);
@@ -392,22 +391,22 @@ export class ModerationService {
     async checkNoColdDM(senderId, recipientId) {
         // Check if recipient has opted into DMs
         const recipient = await this.db.query(
-            'SELECT dm_open FROM users WHERE id = $1',
+            'SELECT dm_open FROM users WHERE id = ?',
             [recipientId]
         );
         
-        if (recipient.rows.length === 0 || !recipient.rows[0].dm_open) {
+        if (!recipient || !recipient.dm_open) {
             // Check if they have prior interaction
             const interaction = await this.db.query(
                 `SELECT 1 FROM messages m1
                  JOIN messages m2 ON m1.channel_id = m2.channel_id
-                 WHERE m1.user_id = $1 AND m2.user_id = $2
-                 AND m1.created_at > NOW() - INTERVAL '30 days'
+                 WHERE m1.user_id = ? AND m2.user_id = ?
+                 AND m1.created_at > datetime('now', '-30 days')
                  LIMIT 1`,
                 [senderId, recipientId]
             );
             
-            if (interaction.rows.length === 0) {
+            if (!interaction) {
                 return false; // No cold DM allowed
             }
         }
@@ -470,3 +469,4 @@ export class ModerationService {
         );
     }
 }
+

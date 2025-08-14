@@ -35,18 +35,16 @@ export class GamificationService {
             // Log the action
             await this.db.query(
                 `INSERT INTO actions_log (user_id, type, ref_message_id, ref_user_id, points, season_id, week_key, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [userId, actionType, refId, refUserId, finalPoints, season.id, weekKey, new Date()]
             );
 
             // Update season score
             if (finalPoints > 0) {
                 await this.db.query(
-                    `INSERT INTO scores (user_id, season_id, points)
-                     VALUES ($1, $2, $3)
-                     ON CONFLICT (user_id, season_id)
-                     DO UPDATE SET points = scores.points + $3, updated_at = NOW()`,
-                    [userId, season.id, finalPoints]
+                    `INSERT OR REPLACE INTO scores (user_id, season_id, points, updated_at)
+                     VALUES (?, ?, COALESCE((SELECT points FROM scores WHERE user_id = ? AND season_id = ?), 0) + ?, datetime('now'))`,
+                    [userId, season.id, userId, season.id, finalPoints]
                 );
             }
 
@@ -98,15 +96,19 @@ export class GamificationService {
 
         const result = await this.db.query(
             `INSERT INTO seasons (start_date, end_date, status)
-             VALUES ($1, $2, 'active')
-             RETURNING *`,
+             VALUES (?, ?, 'active')`,
             [startDate, endDate]
+        );
+        
+        const newSeason = await this.db.query(
+            'SELECT * FROM seasons WHERE id = ?',
+            [result.lastID]
         );
 
         // Announce new season
-        await this.announceNewSeason(result.rows[0]);
+        await this.announceNewSeason(newSeason);
         
-        return result.rows[0];
+        return newSeason;
     }
 
     async endCurrentSeason() {
@@ -116,7 +118,7 @@ export class GamificationService {
 
         // Update season status
         await this.db.query(
-            "UPDATE seasons SET status = 'closed' WHERE id = $1",
+            "UPDATE seasons SET status = 'closed' WHERE id = ?",
             [season.id]
         );
 
@@ -125,14 +127,14 @@ export class GamificationService {
             `SELECT u.username, s.points
              FROM scores s
              JOIN users u ON s.user_id = u.id
-             WHERE s.season_id = $1
+             WHERE s.season_id = ?
              ORDER BY s.points DESC
              LIMIT 10`,
             [season.id]
         );
 
         // Announce season end
-        await this.announceSeasonEnd(season, winners.rows);
+        await this.announceSeasonEnd(season, winners || []);
 
         // Start new season
         await this.startNewSeason();
@@ -142,11 +144,11 @@ export class GamificationService {
         const result = await this.db.query(
             `SELECT SUM(points) as total
              FROM actions_log
-             WHERE user_id = $1 AND week_key = $2`,
+             WHERE user_id = ? AND week_key = ?`,
             [userId, weekKey]
         );
         
-        return parseInt(result.rows[0]?.total || 0);
+        return parseInt(result?.total || 0);
     }
 
     async checkWeeklyGoal(userId) {
@@ -156,11 +158,11 @@ export class GamificationService {
         const actions = await this.db.query(
             `SELECT COUNT(DISTINCT type) as unique_types, COUNT(*) as total
              FROM actions_log
-             WHERE user_id = $1 AND week_key = $2`,
+             WHERE user_id = ? AND week_key = ?`,
             [userId, weekKey]
         );
         
-        return parseInt(actions.rows[0]?.total || 0) >= requiredActions;
+        return parseInt(actions?.total || 0) >= requiredActions;
     }
 
     async updateWeeklyStreak(userId, achieved) {
@@ -168,20 +170,19 @@ export class GamificationService {
         
         if (achieved) {
             await this.db.query(
-                `INSERT INTO streaks (user_id, weekly_current, weekly_best, last_week_achieved, updated_at)
-                 VALUES ($1, 1, 1, $2, $3)
-                 ON CONFLICT (user_id) DO UPDATE
-                 SET weekly_current = streaks.weekly_current + 1,
-                     weekly_best = GREATEST(streaks.weekly_best, streaks.weekly_current + 1),
-                     last_week_achieved = $2,
-                     updated_at = $3`,
-                [userId, this.getCurrentWeekKey(), now]
+                `INSERT OR REPLACE INTO streaks (user_id, weekly_current, weekly_best, last_week_achieved, updated_at)
+                 VALUES (?, 
+                         COALESCE((SELECT weekly_current FROM streaks WHERE user_id = ?), 0) + 1,
+                         MAX(COALESCE((SELECT weekly_best FROM streaks WHERE user_id = ?), 0), 
+                             COALESCE((SELECT weekly_current FROM streaks WHERE user_id = ?), 0) + 1),
+                         ?, ?)`,
+                [userId, userId, userId, userId, this.getCurrentWeekKey(), now]
             );
         } else {
             await this.db.query(
                 `UPDATE streaks 
-                 SET weekly_current = 0, updated_at = $1
-                 WHERE user_id = $2`,
+                 SET weekly_current = 0, updated_at = ?
+                 WHERE user_id = ?`,
                 [now, userId]
             );
         }
@@ -194,13 +195,13 @@ export class GamificationService {
         const counts = await this.db.query(
             `SELECT type, COUNT(*) as count
              FROM actions_log
-             WHERE user_id = $1
+             WHERE user_id = ?
              GROUP BY type`,
             [userId]
         );
         
         const actionCounts = {};
-        counts.rows.forEach(row => {
+        (counts || []).forEach(row => {
             actionCounts[row.type] = parseInt(row.count);
         });
 
@@ -227,11 +228,11 @@ export class GamificationService {
 
         // Check streak badge
         const streakResult = await this.db.query(
-            'SELECT weekly_current FROM streaks WHERE user_id = $1',
+            'SELECT weekly_current FROM streaks WHERE user_id = ?',
             [userId]
         );
         
-        if (streakResult.rows[0]?.weekly_current >= 4) {
+        if (streakResult?.weekly_current >= 4) {
             badges.push('streak_4_weeks');
         }
 
@@ -246,25 +247,25 @@ export class GamificationService {
         const existing = await this.db.query(
             `SELECT 1 FROM user_badges ub
              JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = $1 AND b.code = $2`,
+             WHERE ub.user_id = ? AND b.code = ?`,
             [userId, badgeCode]
         );
         
-        if (existing.rows.length > 0) return;
+        if (existing) return;
 
         // Get badge ID
         const badge = await this.db.query(
-            'SELECT id, label FROM badges WHERE code = $1',
+            'SELECT id, label FROM badges WHERE code = ?',
             [badgeCode]
         );
         
-        if (badge.rows.length === 0) return;
+        if (!badge) return;
 
         // Award badge
         const season = await this.getCurrentSeason();
         await this.db.query(
-            'INSERT INTO user_badges (user_id, badge_id, season_id, awarded_at) VALUES ($1, $2, $3, $4)',
-            [userId, badge.rows[0].id, season?.id, new Date()]
+            'INSERT INTO user_badges (user_id, badge_id, season_id, awarded_at) VALUES (?, ?, ?, ?)',
+            [userId, badge.id, season?.id, new Date()]
         );
 
         // Notify user
@@ -273,7 +274,7 @@ export class GamificationService {
             const embed = new EmbedBuilder()
                 .setColor(0xFFD700)
                 .setTitle('🏆 Badge Earned!')
-                .setDescription(`Congratulations! You've earned the **${badge.rows[0].label}** badge!`)
+                .setDescription(`Congratulations! You've earned the **${badge.label}** badge!`)
                 .setThumbnail('https://emojipedia-us.s3.amazonaws.com/thumbs/240/twitter/322/trophy_1f3c6.png')
                 .setTimestamp();
             
@@ -296,11 +297,11 @@ export class GamificationService {
                 COUNT(DISTINCT CASE WHEN type = 'clinic_helpful' THEN ref_message_id END) as helpful_clinics,
                 COUNT(DISTINCT week_key) as active_weeks
              FROM actions_log
-             WHERE user_id = $1`,
+             WHERE user_id = ?`,
             [userId]
         );
 
-        const { live_demos, helpful_clinics, active_weeks } = stats.rows[0];
+        const { live_demos, helpful_clinics, active_weeks } = stats || { live_demos: 0, helpful_clinics: 0, active_weeks: 0 };
 
         // Check recent activity for Crew role
         const twoWeeksAgo = new Date();
@@ -311,11 +312,11 @@ export class GamificationService {
                 COUNT(DISTINCT week_key) as recent_weeks,
                 COUNT(DISTINCT CASE WHEN type = 'clinic_helpful' THEN ref_message_id END) as recent_clinics
              FROM actions_log
-             WHERE user_id = $1 AND created_at >= $2`,
+             WHERE user_id = ? AND created_at >= ?`,
             [userId, twoWeeksAgo]
         );
 
-        const { recent_weeks, recent_clinics } = recentActivity.rows[0];
+        const { recent_weeks, recent_clinics } = recentActivity || { recent_weeks: 0, recent_clinics: 0 };
 
         // Define role objects
         const crewRole = member.guild.roles.cache.find(r => r.name === 'Crew');
@@ -420,20 +421,20 @@ export class GamificationService {
         const weekStats = await this.db.query(
             `SELECT type, COUNT(*) as count, SUM(points) as points
              FROM actions_log
-             WHERE user_id = $1 AND week_key = $2
+             WHERE user_id = ? AND week_key = ?
              GROUP BY type`,
             [userId, weekKey]
         );
 
         // Get season points
         const seasonPoints = await this.db.query(
-            'SELECT points FROM scores WHERE user_id = $1 AND season_id = $2',
+            'SELECT points FROM scores WHERE user_id = ? AND season_id = ?',
             [userId, season?.id]
         );
 
         // Get streaks
         const streaks = await this.db.query(
-            'SELECT weekly_current, weekly_best FROM streaks WHERE user_id = $1',
+            'SELECT weekly_current, weekly_best FROM streaks WHERE user_id = ?',
             [userId]
         );
 
@@ -442,17 +443,17 @@ export class GamificationService {
             `SELECT b.code, b.label, ub.awarded_at
              FROM user_badges ub
              JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = $1
+             WHERE ub.user_id = ?
              ORDER BY ub.awarded_at DESC`,
             [userId]
         );
 
         return {
-            weekStats: weekStats.rows,
-            seasonPoints: seasonPoints.rows[0]?.points || 0,
-            currentStreak: streaks.rows[0]?.weekly_current || 0,
-            bestStreak: streaks.rows[0]?.weekly_best || 0,
-            badges: badges.rows
+            weekStats: weekStats || [],
+            seasonPoints: seasonPoints?.points || 0,
+            currentStreak: streaks?.weekly_current || 0,
+            bestStreak: streaks?.weekly_best || 0,
+            badges: badges || []
         };
     }
 }

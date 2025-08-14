@@ -92,15 +92,15 @@ export class CronManager {
         const inactiveUsers = await this.bot.db.query(
             `SELECT u.id, u.username, u.last_activity_at 
              FROM users u 
-             WHERE u.away_until IS NULL OR u.away_until < NOW()
-             AND u.last_activity_at < $1
+             WHERE u.away_until IS NULL OR u.away_until < datetime('now')
+             AND u.last_activity_at < ?
              AND u.deleted_at IS NULL`,
             [fourteenDaysAgo]
         );
 
         const modChannel = this.bot.client.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
         
-        for (const user of inactiveUsers.rows) {
+        for (const user of (inactiveUsers || [])) {
             const daysSinceActivity = Math.floor((Date.now() - new Date(user.last_activity_at)) / (1000 * 60 * 60 * 24));
             
             if (daysSinceActivity >= 28) {
@@ -145,31 +145,31 @@ export class CronManager {
 
         // Gather analytics
         const newMembers = await this.bot.db.query(
-            'SELECT COUNT(*) FROM users WHERE joined_at >= $1 AND joined_at <= $2',
+            'SELECT COUNT(*) as count FROM users WHERE joined_at >= ? AND joined_at <= ?',
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
         const activeMembers = await this.bot.db.query(
-            'SELECT COUNT(DISTINCT user_id) FROM messages WHERE created_at >= $1 AND created_at <= $2',
+            'SELECT COUNT(DISTINCT user_id) as count FROM messages WHERE created_at >= ? AND created_at <= ?',
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
         const totalMembers = await this.bot.db.query(
-            'SELECT COUNT(*) FROM users WHERE deleted_at IS NULL'
+            'SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL'
         );
 
         const clinicsGiven = await this.bot.db.query(
-            'SELECT COUNT(*) FROM clinics WHERE created_at >= $1 AND created_at <= $2',
+            'SELECT COUNT(*) as count FROM clinics WHERE created_at >= ? AND created_at <= ?',
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
         const helpSolved = await this.bot.db.query(
-            'SELECT COUNT(*) FROM help_requests WHERE solved_at >= $1 AND solved_at <= $2',
+            'SELECT COUNT(*) as count FROM help_requests WHERE solved_at >= ? AND solved_at <= ?',
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
         const demosPosted = await this.bot.db.query(
-            'SELECT COUNT(*) FROM demos WHERE created_at >= $1 AND created_at <= $2',
+            'SELECT COUNT(*) as count FROM demos WHERE created_at >= ? AND created_at <= ?',
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
@@ -177,14 +177,14 @@ export class CronManager {
         const topHelpers = await this.bot.db.query(
             `SELECT receiver_id, COUNT(*) as kudos_count 
              FROM kudos 
-             WHERE created_at >= $1 AND created_at <= $2 
+             WHERE created_at >= ? AND created_at <= ? 
              GROUP BY receiver_id 
              ORDER BY kudos_count DESC 
              LIMIT 3`,
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
-        const activePercent = ((parseInt(activeMembers.rows[0].count) / parseInt(totalMembers.rows[0].count)) * 100).toFixed(1);
+        const activePercent = ((parseInt(activeMembers.count) / parseInt(totalMembers.count)) * 100).toFixed(1);
 
         // Create digest embed
         const embed = new EmbedBuilder()
@@ -192,17 +192,17 @@ export class CronManager {
             .setTitle('📊 Weekly Community Digest')
             .setDescription(`Week of ${weekStart.format('MMM D')} - ${weekEnd.format('MMM D, YYYY')}`)
             .addFields(
-                { name: '👥 New Members', value: newMembers.rows[0].count, inline: true },
+                { name: '👥 New Members', value: newMembers.count.toString(), inline: true },
                 { name: '📈 Active %', value: `${activePercent}%`, inline: true },
-                { name: '💡 Feedback Given', value: clinicsGiven.rows[0].count, inline: true },
-                { name: '✅ Problems Solved', value: helpSolved.rows[0].count, inline: true },
-                { name: '🎬 Demos Posted', value: demosPosted.rows[0].count, inline: true }
+                { name: '💡 Feedback Given', value: clinicsGiven.count.toString(), inline: true },
+                { name: '✅ Problems Solved', value: helpSolved.count.toString(), inline: true },
+                { name: '🎬 Demos Posted', value: demosPosted.count.toString(), inline: true }
             )
             .setTimestamp();
 
-        if (topHelpers.rows.length > 0) {
+        if (topHelpers && topHelpers.length > 0) {
             const helpers = await Promise.all(
-                topHelpers.rows.map(async (h, i) => {
+                topHelpers.map(async (h, i) => {
                     const user = await this.bot.client.users.fetch(h.receiver_id);
                     return `${i + 1}. ${user.username} (${h.kudos_count} kudos)`;
                 })
@@ -214,14 +214,14 @@ export class CronManager {
         await this.bot.db.query(
             `INSERT INTO analytics_snapshots 
              (week_start, active_percent, new_members, clinics_given, help_requests_solved, demos_posted)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
                 weekStart.toDate(),
                 activePercent,
-                newMembers.rows[0].count,
-                clinicsGiven.rows[0].count,
-                helpSolved.rows[0].count,
-                demosPosted.rows[0].count
+                newMembers.count,
+                clinicsGiven.count,
+                helpSolved.count,
+                demosPosted.count
             ]
         );
 
@@ -262,33 +262,32 @@ export class CronManager {
         const achievers = await this.bot.db.query(
             `SELECT user_id, COUNT(DISTINCT type) as action_types, COUNT(*) as total_actions
              FROM actions_log
-             WHERE created_at >= $1 AND created_at <= $2
+             WHERE created_at >= ? AND created_at <= ?
              GROUP BY user_id
              HAVING COUNT(*) >= 2`,
             [weekStart.toDate(), weekEnd.toDate()]
         );
 
         // Update streaks for achievers
-        for (const achiever of achievers.rows) {
+        for (const achiever of (achievers || [])) {
             await this.bot.db.query(
-                `INSERT INTO streaks (user_id, weekly_current, weekly_best, last_week_achieved)
-                 VALUES ($1, 1, 1, $2)
-                 ON CONFLICT (user_id) DO UPDATE
-                 SET weekly_current = streaks.weekly_current + 1,
-                     weekly_best = GREATEST(streaks.weekly_best, streaks.weekly_current + 1),
-                     last_week_achieved = $2,
-                     updated_at = NOW()`,
-                [achiever.user_id, weekEnd.toDate()]
+                `INSERT OR REPLACE INTO streaks (user_id, weekly_current, weekly_best, last_week_achieved, updated_at)
+                 VALUES (?, 
+                         COALESCE((SELECT weekly_current FROM streaks WHERE user_id = ?), 0) + 1,
+                         MAX(COALESCE((SELECT weekly_best FROM streaks WHERE user_id = ?), 0), 
+                             COALESCE((SELECT weekly_current FROM streaks WHERE user_id = ?), 0) + 1),
+                         ?, datetime('now'))`,
+                [achiever.user_id, achiever.user_id, achiever.user_id, achiever.user_id, weekEnd.toDate()]
             );
         }
 
         // Reset streaks for non-achievers
         await this.bot.db.query(
             `UPDATE streaks 
-             SET weekly_current = 0, updated_at = NOW()
+             SET weekly_current = 0, updated_at = datetime('now')
              WHERE user_id NOT IN (
                  SELECT user_id FROM actions_log 
-                 WHERE created_at >= $1 AND created_at <= $2
+                 WHERE created_at >= ? AND created_at <= ?
                  GROUP BY user_id HAVING COUNT(*) >= 2
              )`,
             [weekStart.toDate(), weekEnd.toDate()]
@@ -303,17 +302,17 @@ export class CronManager {
         const quietUsers = await this.bot.db.query(
             `SELECT DISTINCT u.id, u.username 
              FROM users u
-             WHERE u.last_activity_at < $1
-             AND (u.away_until IS NULL OR u.away_until < NOW())
+             WHERE u.last_activity_at < ?
+             AND (u.away_until IS NULL OR u.away_until < datetime('now'))
              AND u.deleted_at IS NULL
              AND NOT EXISTS (
                  SELECT 1 FROM messages m 
-                 WHERE m.user_id = u.id AND m.created_at > $1
+                 WHERE m.user_id = u.id AND m.created_at > ?
              )`,
             [nudgeDate]
         );
 
-        for (const user of quietUsers.rows) {
+        for (const user of (quietUsers || [])) {
             try {
                 const member = await this.bot.client.users.fetch(user.id);
                 await member.send(
@@ -329,12 +328,17 @@ export class CronManager {
     }
 
     async cleanupAwayStatuses() {
+        // Get users whose away status will be cleared first
+        const clearedUsers = await this.bot.db.query(
+            `SELECT id FROM users 
+             WHERE away_until < datetime('now') AND away_until IS NOT NULL`
+        );
+        
         // Clear expired away statuses
-        const cleared = await this.bot.db.query(
+        await this.bot.db.query(
             `UPDATE users 
              SET away_until = NULL 
-             WHERE away_until < NOW() AND away_until IS NOT NULL
-             RETURNING id`
+             WHERE away_until < datetime('now') AND away_until IS NOT NULL`
         );
 
         // Remove Away role from cleared users
@@ -342,7 +346,7 @@ export class CronManager {
         const awayRole = guild.roles.cache.find(r => r.name === 'Away');
         
         if (awayRole) {
-            for (const user of cleared.rows) {
+            for (const user of (clearedUsers || [])) {
                 try {
                     const member = await guild.members.fetch(user.id);
                     await member.roles.remove(awayRole);
@@ -387,114 +391,5 @@ export class CronManager {
             job.stop();
             this.bot.logger.info(`Stopped cron job: ${name}`);
         }
-    }
-}
-
-// src/utils/Logger.js
-import chalk from 'chalk';
-import fs from 'fs';
-import path from 'path';
-
-export class Logger {
-    constructor(options = {}) {
-        this.logLevel = options.logLevel || process.env.LOG_LEVEL || 'info';
-        this.logToFile = options.logToFile || process.env.LOG_TO_FILE === 'true';
-        this.logFilePath = options.logFilePath || process.env.LOG_FILE_PATH || './logs/bot.log';
-        
-        if (this.logToFile) {
-            this.ensureLogDirectory();
-        }
-    }
-
-    ensureLogDirectory() {
-        const dir = path.dirname(this.logFilePath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-    }
-
-    log(level, message, ...args) {
-        const timestamp = new Date().toISOString();
-        const formattedMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
-        
-        // Console output with colors
-        switch (level) {
-            case 'error':
-                console.error(chalk.red(formattedMessage), ...args);
-                break;
-            case 'warn':
-                console.warn(chalk.yellow(formattedMessage), ...args);
-                break;
-            case 'info':
-                console.info(chalk.blue(formattedMessage), ...args);
-                break;
-            case 'success':
-                console.log(chalk.green(formattedMessage), ...args);
-                break;
-            case 'debug':
-                if (this.logLevel === 'debug') {
-                    console.log(chalk.gray(formattedMessage), ...args);
-                }
-                break;
-            default:
-                console.log(formattedMessage, ...args);
-        }
-        
-        // File output
-        if (this.logToFile) {
-            const logEntry = `${formattedMessage} ${args.join(' ')}\n`;
-            fs.appendFileSync(this.logFilePath, logEntry);
-        }
-    }
-
-    error(message, ...args) {
-        this.log('error', message, ...args);
-    }
-
-    warn(message, ...args) {
-        this.log('warn', message, ...args);
-    }
-
-    info(message, ...args) {
-        this.log('info', message, ...args);
-    }
-
-    success(message, ...args) {
-        this.log('success', message, ...args);
-    }
-
-    debug(message, ...args) {
-        this.log('debug', message, ...args);
-    }
-}
-
-// src/services/PolicyManager.js
-export class PolicyManager {
-    constructor(db) {
-        this.db = db;
-        this.policies = new Map();
-    }
-
-    async loadPolicies() {
-        const result = await this.db.query('SELECT key, value FROM policies');
-        for (const row of result.rows) {
-            this.policies.set(row.key, row.value);
-        }
-    }
-
-    get(key, defaultValue = null) {
-        return this.policies.get(key) || defaultValue;
-    }
-
-    async set(key, value) {
-        await this.db.query(
-            'INSERT INTO policies (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
-            [key, JSON.stringify(value)]
-        );
-        this.policies.set(key, value);
-    }
-
-    getAll() {
-        return Object.fromEntries(this.policies);
     }
 }

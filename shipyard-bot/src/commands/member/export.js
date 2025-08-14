@@ -59,14 +59,14 @@ export default class ExportCommand extends BaseCommand {
 
         // User profile
         const profile = await this.db.query(
-            'SELECT * FROM users WHERE id = $1',
+            'SELECT * FROM users WHERE id = ?',
             [userId]
         );
         data.profile = profile.rows[0] || {};
 
         // Messages
         const messages = await this.db.query(
-            'SELECT * FROM messages WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100',
+            'SELECT * FROM messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
             [userId]
         );
         data.messages = messages.rows;
@@ -75,64 +75,64 @@ export default class ExportCommand extends BaseCommand {
         const rsvps = await this.db.query(
             `SELECT m.*, r.status as rsvp_status, a.attended
              FROM meets m
-             LEFT JOIN meet_rsvps r ON m.id = r.meet_id AND r.user_id = $1
-             LEFT JOIN meet_attendance a ON m.id = a.meet_id AND a.user_id = $1
-             WHERE r.user_id = $1 OR a.user_id = $1`,
-            [userId]
+             LEFT JOIN meet_rsvps r ON m.id = r.meet_id AND r.user_id = ?
+             LEFT JOIN meet_attendance a ON m.id = a.meet_id AND a.user_id = ?
+             WHERE r.user_id = ? OR a.user_id = ?`,
+            [userId, userId, userId, userId]
         );
         data.meetings = rsvps.rows;
 
         // Clinics
         const clinics = await this.db.query(
-            'SELECT * FROM clinics WHERE author_id = $1',
+            'SELECT * FROM clinics WHERE author_id = ?',
             [userId]
         );
         data.clinics = clinics.rows;
 
         // Help requests
         const helpRequests = await this.db.query(
-            'SELECT * FROM help_requests WHERE author_id = $1 OR solved_by = $1',
-            [userId]
+            'SELECT * FROM help_requests WHERE author_id = ? OR solved_by = ?',
+            [userId, userId]
         );
         data.helpRequests = helpRequests.rows;
 
         // Demos
         const demos = await this.db.query(
-            'SELECT * FROM demos WHERE author_id = $1',
+            'SELECT * FROM demos WHERE author_id = ?',
             [userId]
         );
         data.demos = demos.rows;
 
         // Kudos
         const kudosGiven = await this.db.query(
-            'SELECT * FROM kudos WHERE giver_id = $1',
+            'SELECT * FROM kudos WHERE giver_id = ?',
             [userId]
         );
         data.kudos.given = kudosGiven.rows;
 
         const kudosReceived = await this.db.query(
-            'SELECT * FROM kudos WHERE receiver_id = $1',
+            'SELECT * FROM kudos WHERE receiver_id = ?',
             [userId]
         );
         data.kudos.received = kudosReceived.rows;
 
         // Gamification data
         const scores = await this.db.query(
-            'SELECT * FROM scores WHERE user_id = $1',
+            'SELECT * FROM scores WHERE user_id = ?',
             [userId]
         );
         const streaks = await this.db.query(
-            'SELECT * FROM streaks WHERE user_id = $1',
+            'SELECT * FROM streaks WHERE user_id = ?',
             [userId]
         );
         const badges = await this.db.query(
             `SELECT b.*, ub.awarded_at FROM user_badges ub
              JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = $1`,
+             WHERE ub.user_id = ?`,
             [userId]
         );
         const actions = await this.db.query(
-            'SELECT * FROM actions_log WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500',
+            'SELECT * FROM actions_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 500',
             [userId]
         );
 
