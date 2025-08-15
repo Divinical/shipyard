@@ -1,5 +1,5 @@
 // src/commands/BaseCommand.js
-import { PermissionFlagsBits } from 'discord.js';
+import { PermissionFlagsBits, MessageFlags } from 'discord.js';
 
 export class BaseCommand {
     constructor(bot) {
@@ -27,7 +27,7 @@ export class BaseCommand {
     async sendError(interaction, message) {
         await interaction.reply({
             content: `❌ ${message}`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -35,7 +35,7 @@ export class BaseCommand {
     async sendSuccess(interaction, message) {
         await interaction.reply({
             content: `✅ ${message}`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 }

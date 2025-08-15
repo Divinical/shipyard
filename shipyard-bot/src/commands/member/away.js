@@ -7,27 +7,27 @@ export default class AwayCommand extends BaseCommand {
         super(bot);
         this.data = new SlashCommandBuilder()
             .setName('away')
-            .setDescription('Manage your away status')
+            .setDescription('Tell everyone you will be gone for a while')
             .addSubcommand(subcommand =>
                 subcommand
                     .setName('set')
-                    .setDescription('Set your away status')
+                    .setDescription('Set yourself as away - you will not get daily reminders')
                     .addIntegerOption(option =>
                         option
                             .setName('days')
-                            .setDescription('Number of days you will be away')
+                            .setDescription('How many days will you be away?')
                             .setRequired(true)
                             .setMinValue(1)
                             .setMaxValue(365))
                     .addStringOption(option =>
                         option
                             .setName('reason')
-                            .setDescription('Reason for being away (optional)')
+                            .setDescription('Why are you going away? (vacation, busy with work, etc.)')
                             .setRequired(false)))
             .addSubcommand(subcommand =>
                 subcommand
-                    .setName('clear')
-                    .setDescription('Clear your away status'));
+                    .setName('back')
+                    .setDescription('Tell everyone you are back from being away'));
     }
 
     async execute(interaction) {
@@ -58,7 +58,7 @@ export default class AwayCommand extends BaseCommand {
                 `Away status set until ${awayUntil.toLocaleDateString()}. Reason: ${reason}`
             );
 
-        } else if (subcommand === 'clear') {
+        } else if (subcommand === 'back') {
             await this.db.query(
                 'UPDATE users SET away_until = NULL WHERE id = ?',
                 [userId]

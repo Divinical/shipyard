@@ -2,10 +2,12 @@
 // src/commands/admin/freeze.js
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class FreezeCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('freeze')
             .setDescription('Temporarily freeze a user\'s point accrual (Founder only)')
@@ -46,20 +48,23 @@ export default class FreezeCommand extends BaseCommand {
         );
 
         // Log to mod room
-        const modChannel = interaction.guild.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
-        if (modChannel) {
-            const embed = new EmbedBuilder()
-                .setColor(0x00FFFF)
-                .setTitle('❄️ User Frozen')
-                .setDescription(`${interaction.user} froze ${targetUser}`)
-                .addFields(
-                    { name: 'Duration', value: `${hours} hours`, inline: true },
-                    { name: 'Until', value: unfreezeAt.toLocaleString(), inline: true },
-                    { name: 'Reason', value: reason }
-                )
-                .setTimestamp();
-            await modChannel.send({ embeds: [embed] });
-        }
+        const embed = new EmbedBuilder()
+            .setColor(0x00FFFF)
+            .setTitle('❄️ User Frozen')
+            .setDescription(`${interaction.user} froze ${targetUser}`)
+            .addFields(
+                { name: 'Duration', value: `${hours} hours`, inline: true },
+                { name: 'Until', value: unfreezeAt.toLocaleString(), inline: true },
+                { name: 'Reason', value: reason }
+            )
+            .setTimestamp();
+
+        await this.channelManager.postMessage(
+            'MOD_ROOM',
+            interaction,
+            { embeds: [embed] },
+            false // Don't fallback for mod logs
+        );
 
         await this.sendSuccess(interaction, `${targetUser} has been frozen for ${hours} hours`);
     }

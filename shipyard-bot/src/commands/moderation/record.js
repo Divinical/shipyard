@@ -1,11 +1,13 @@
 // src/commands/moderation/record.js
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export default class RecordCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('record')
             .setDescription('Manage recording consent')
@@ -97,15 +99,16 @@ export default class RecordCommand extends BaseCommand {
             ephemeral: true
         });
 
-        // Post consent request in text channel
-        const textChannel = interaction.guild.channels.cache.get(process.env.ANNOUNCEMENTS_CHANNEL_ID);
-        if (textChannel) {
-            await textChannel.send({
+        // Post consent request in announcements channel
+        await this.channelManager.postMessage(
+            'ANNOUNCEMENTS',
+            interaction,
+            {
                 content: `@everyone - Recording consent needed for ${channel}`,
                 embeds: [embed],
                 components: [row]
-            });
-        }
+            }
+        );
 
         await this.sendSuccess(
             interaction,
@@ -172,13 +175,15 @@ export default class RecordCommand extends BaseCommand {
         await interaction.reply({ embeds: [embed], ephemeral: true });
 
         // Log to mod room
-        const modChannel = interaction.guild.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
-        if (modChannel) {
-            await modChannel.send({
+        await this.channelManager.postMessage(
+            'MOD_ROOM',
+            interaction,
+            {
                 content: `Recording session \`${sessionId}\` completed`,
                 embeds: [embed]
-            });
-        }
+            },
+            false // Don't fallback for mod logs
+        );
     }
 
     calculateDuration(startTime) {

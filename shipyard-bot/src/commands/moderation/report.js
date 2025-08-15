@@ -1,13 +1,15 @@
 // src/commands/moderation/report.js
 import { SlashCommandBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class ReportCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('report')
-            .setDescription('Report system commands')
+            .setDescription('Report users or issues - reports are sent to moderators')
             .addSubcommand(subcommand =>
                 subcommand
                     .setName('user')
@@ -127,23 +129,26 @@ export default class ReportCommand extends BaseCommand {
 
         const reportId = result.lastID;
 
-        // Alert mods
-        const modChannel = interaction.guild.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
-        if (modChannel) {
-            const embed = new EmbedBuilder()
-                .setColor(0xFF0000)
-                .setTitle('🚫 DM Policy Violation Report')
-                .setDescription(`Report #${reportId}`)
-                .addFields(
-                    { name: 'Reporter', value: `<@${interaction.user.id}>`, inline: true },
-                    { name: 'Reported User', value: `<@${targetUser.id}>`, inline: true },
-                    { name: 'Type', value: 'Unwanted DM', inline: true }
-                )
-                .setFooter({ text: 'Review with /report review' })
-                .setTimestamp();
+        // Create mod alert embed
+        const modEmbed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('🚫 DM Policy Violation Report')
+            .setDescription(`Report #${reportId}`)
+            .addFields(
+                { name: 'Reporter', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Reported User', value: `<@${targetUser.id}>`, inline: true },
+                { name: 'Type', value: 'Unwanted DM', inline: true }
+            )
+            .setFooter({ text: 'Review with /report review' })
+            .setTimestamp();
 
-            await modChannel.send({ embeds: [embed] });
-        }
+        // Alert mods using ChannelManager
+        const { message: modMessage, channel: modChannel, usedFallback } = await this.channelManager.postMessage(
+            'MOD_ROOM',
+            interaction,
+            { embeds: [modEmbed] },
+            false // Don't allow fallback for mod reports
+        );
 
         await this.sendSuccess(
             interaction,

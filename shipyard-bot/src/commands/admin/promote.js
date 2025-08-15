@@ -1,10 +1,12 @@
 // src/commands/admin/promote.js
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class PromoteCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('promote')
             .setDescription('Manually promote/demote user roles (Founder only)')
@@ -83,16 +85,19 @@ export default class PromoteCommand extends BaseCommand {
 
         // Announce if it's a progression role
         if (['Crew', 'Builder', 'Senior Builder'].includes(role.name)) {
-            const channel = interaction.guild.channels.cache.get(process.env.ANNOUNCEMENTS_CHANNEL_ID);
-            if (channel) {
-                const embed = new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setTitle('🎉 Role Promotion!')
-                    .setDescription(`${member} has been promoted to **${role.name}** by ${interaction.user}!`)
-                    .setThumbnail(member.user.displayAvatarURL())
-                    .setTimestamp();
-                await channel.send({ embeds: [embed] });
-            }
+            const embed = new EmbedBuilder()
+                .setColor(0x00FF00)
+                .setTitle('🎉 Role Promotion!')
+                .setDescription(`${member} has been promoted to **${role.name}** by ${interaction.user}!`)
+                .setThumbnail(member.user.displayAvatarURL())
+                .setTimestamp();
+
+            await this.channelManager.postMessage(
+                'ANNOUNCEMENTS',
+                interaction,
+                { embeds: [embed] },
+                false // Don't fallback for role announcements
+            );
         }
 
         await this.sendSuccess(interaction, `Promoted ${member} to ${role.name}`);

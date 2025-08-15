@@ -6,8 +6,8 @@ export default class StartCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
         this.data = new SlashCommandBuilder()
-            .setName('start')
-            .setDescription('Start the onboarding process');
+            .setName('introduce')
+            .setDescription('Introduce yourself - your intro will be posted in the introductions channel');
     }
 
     async execute(interaction) {
@@ -29,37 +29,40 @@ export default class StartCommand extends BaseCommand {
         // Add input fields
         const nameInput = new TextInputBuilder()
             .setCustomId('name')
-            .setLabel('Your Name')
+            .setLabel('What should we call you?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(100);
+            .setMaxLength(100)
+            .setPlaceholder('Your name or nickname');
 
         const timezoneInput = new TextInputBuilder()
             .setCustomId('timezone')
-            .setLabel('Timezone (e.g., America/New_York)')
+            .setLabel('What timezone are you in?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setPlaceholder('Europe/London');
+            .setPlaceholder('Europe/London, America/New_York, Asia/Tokyo, etc.');
 
         const oneLinerInput = new TextInputBuilder()
             .setCustomId('oneliner')
-            .setLabel('One-liner about yourself')
+            .setLabel('About yourself (one sentence)')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(200);
+            .setMaxLength(200)
+            .setPlaceholder('I am a student learning to code, I build mobile apps, etc.');
 
         const projectInput = new TextInputBuilder()
             .setCustomId('project')
-            .setLabel('Current Project URLs (comma separated)')
+            .setLabel('Your projects (optional)')
             .setStyle(TextInputStyle.Paragraph)
-            .setRequired(false);
+            .setRequired(false)
+            .setPlaceholder('https://myapp.com, https://github.com/myusername/myproject');
 
         const skillsInput = new TextInputBuilder()
             .setCustomId('skills')
-            .setLabel('Your Skills (comma separated)')
+            .setLabel('Your skills (separate with commas)')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
-            .setPlaceholder('React, Node.js, Design, Marketing...');
+            .setPlaceholder('Python, Web Design, React, Marketing, Writing, etc.');
 
         // Create action rows
         const rows = [

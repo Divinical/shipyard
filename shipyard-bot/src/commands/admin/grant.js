@@ -63,6 +63,13 @@ export default class GrantCommand extends BaseCommand {
     }
 
     async grantBadge(interaction, targetUser, badgeCode) {
+        // Ensure user exists in database first
+        await this.db.query(
+            `INSERT OR IGNORE INTO users (id, username, joined_at) 
+             VALUES (?, ?, ?)`,
+            [targetUser.id, targetUser.username, new Date()]
+        );
+
         // Get badge ID
         const badge = await this.db.query(
             'SELECT id, label FROM badges WHERE code = ?',

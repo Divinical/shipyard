@@ -105,13 +105,13 @@ export default class ExportCommand extends BaseCommand {
 
         // Kudos
         const kudosGiven = await this.db.query(
-            'SELECT * FROM kudos WHERE giver_id = ?',
+            'SELECT * FROM kudos WHERE from_user_id = ?',
             [userId]
         );
         data.kudos.given = kudosGiven.rows;
 
         const kudosReceived = await this.db.query(
-            'SELECT * FROM kudos WHERE receiver_id = ?',
+            'SELECT * FROM kudos WHERE to_user_id = ?',
             [userId]
         );
         data.kudos.received = kudosReceived.rows;

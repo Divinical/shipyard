@@ -6,17 +6,17 @@ export default class KudosCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
         this.data = new SlashCommandBuilder()
-            .setName('kudos')
-            .setDescription('Give kudos to a helpful member')
+            .setName('thanks')
+            .setDescription('Thank someone who helped you - give them points!')
             .addUserOption(option =>
                 option
                     .setName('user')
-                    .setDescription('The user to give kudos to')
+                    .setDescription('Who do you want to thank?')
                     .setRequired(true))
             .addStringOption(option =>
                 option
                     .setName('reason')
-                    .setDescription('Why are you giving kudos?')
+                    .setDescription('Why are you thanking them? What did they help you with?')
                     .setRequired(true)
                     .setMaxLength(200));
     }
@@ -35,9 +35,22 @@ export default class KudosCommand extends BaseCommand {
             return this.sendError(interaction, "You can't give kudos to bots!");
         }
 
+        // Ensure both users exist in database
+        await this.db.query(
+            `INSERT OR IGNORE INTO users (id, username, joined_at) 
+             VALUES (?, ?, ?)`,
+            [interaction.user.id, interaction.user.username, new Date()]
+        );
+        
+        await this.db.query(
+            `INSERT OR IGNORE INTO users (id, username, joined_at) 
+             VALUES (?, ?, ?)`,
+            [targetUser.id, targetUser.username, new Date()]
+        );
+
         // Save kudos
         await this.db.query(
-            'INSERT INTO kudos (giver_id, receiver_id, reason, created_at) VALUES (?, ?, ?, ?)',
+            'INSERT INTO kudos (from_user_id, to_user_id, reason, created_at) VALUES (?, ?, ?, ?)',
             [interaction.user.id, targetUser.id, reason, new Date()]
         );
 
@@ -62,7 +75,7 @@ export default class KudosCommand extends BaseCommand {
         weekStart.setHours(0, 0, 0, 0);
 
         const kudosCount = await this.db.query(
-            'SELECT COUNT(*) FROM kudos WHERE receiver_id = ? AND created_at >= ?',
+            'SELECT COUNT(*) FROM kudos WHERE to_user_id = ? AND created_at >= ?',
             [userId, weekStart]
         );
 

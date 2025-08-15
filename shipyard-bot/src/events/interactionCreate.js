@@ -1,9 +1,12 @@
 // src/events/interactionCreate.js
-import { Events } from 'discord.js';
+import { Events, MessageFlags } from 'discord.js';
+import { ChannelManager } from '../utils/ChannelManager.js';
 
 export default {
     name: Events.InteractionCreate,
     async execute(interaction, bot) {
+        const channelManager = new ChannelManager(bot);
+        
         try {
             // Handle slash commands
             if (interaction.isChatInputCommand()) {
@@ -38,7 +41,7 @@ export default {
             
             // Handle modal submissions
             else if (interaction.isModalSubmit()) {
-                await handleModalSubmit(interaction, bot);
+                await handleModalSubmit(interaction, bot, channelManager);
             }
             
             // Handle select menu interactions
@@ -64,6 +67,9 @@ async function handleButtonInteraction(interaction, bot) {
             break;
         case 'helpful':
             await markAsHelpful(bot, interaction, params[0]);
+            break;
+        case 'resolved':
+            await markAsResolved(bot, interaction, params[0]);
             break;
         case 'consent':
             await handleConsent(bot, interaction, params[0], params[1]);
@@ -148,6 +154,33 @@ async function markAsHelpful(bot, interaction, clinicId) {
     });
 }
 
+async function markAsResolved(bot, interaction, clinicId) {
+    const result = await bot.db.query(
+        'SELECT author_id FROM clinics WHERE id = ?',
+        [clinicId]
+    );
+    
+    const isAuthor = result.rows[0]?.author_id === interaction.user.id;
+    const isMod = interaction.member.roles.cache.some(r => r.name === 'Mod' || r.name === 'Founder');
+    
+    if (!isAuthor && !isMod) {
+        return interaction.reply({
+            content: 'Only the request author or moderators can mark this as resolved.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    
+    await bot.db.query(
+        'UPDATE clinics SET status = ?, solved_at = ? WHERE id = ?',
+        ['solved', new Date(), clinicId]
+    );
+    
+    await interaction.reply({
+        content: 'Feedback request marked as resolved!',
+        flags: MessageFlags.Ephemeral
+    });
+}
+
 async function handleConsent(bot, interaction, response, sessionId) {
     await bot.db.query(
         'INSERT INTO consents (session_id, user_id, consent, timestamp) VALUES (?, ?, ?, ?)',
@@ -188,17 +221,17 @@ async function confirmDataDeletion(bot, interaction, userId) {
     });
 }
 
-async function handleModalSubmit(interaction, bot) {
+async function handleModalSubmit(interaction, bot, channelManager) {
     if (interaction.customId === 'onboarding_modal') {
-        await processOnboarding(interaction, bot);
+        await processOnboarding(interaction, bot, channelManager);
     } else if (interaction.customId === 'clinic_modal') {
-        await processClinicRequest(interaction, bot);
+        await processClinicRequest(interaction, bot, channelManager);
     } else if (interaction.customId.startsWith('report_details_')) {
         await processReportDetails(interaction, bot);
     }
 }
 
-async function processOnboarding(interaction, bot) {
+async function processOnboarding(interaction, bot, channelManager) {
     const name = interaction.fields.getTextInputValue('name');
     const timezone = interaction.fields.getTextInputValue('timezone');
     const oneliner = interaction.fields.getTextInputValue('oneliner');
@@ -222,11 +255,27 @@ async function processOnboarding(interaction, bot) {
         introEmbed.addFields({ name: '🚀 Projects', value: project });
     }
     
-    // Post to introductions
-    const introChannel = interaction.guild.channels.cache.get(process.env.INTRO_CHANNEL_ID);
-    const introMessage = await introChannel.send({ embeds: [introEmbed] });
+    // Post to introductions using ChannelManager
+    const { message: introMessage, channel: introChannel, usedFallback, error } = await channelManager.postMessage(
+        'INTRO',
+        interaction,
+        { embeds: [introEmbed] }
+    );
+
+    if (!introMessage) {
+        return interaction.reply({
+            content: `Unable to post introduction: ${error}`,
+            ephemeral: true
+        });
+    }
     
-    // Update user record
+    // Insert or update user record
+    await bot.db.query(
+        `INSERT OR IGNORE INTO users (id, username, joined_at) 
+         VALUES (?, ?, ?)`,
+        [interaction.user.id, interaction.user.username, new Date()]
+    );
+    
     await bot.db.query(
         `UPDATE users 
          SET timezone = ?, skills = ?, intro_post_id = ?
@@ -240,28 +289,24 @@ async function processOnboarding(interaction, bot) {
         await interaction.member.roles.add(memberRole);
     }
     
+    const successMessage = usedFallback 
+        ? '✅ Welcome to ShipYard! Your introduction has been posted in this channel.'
+        : `✅ Welcome to ShipYard! Your introduction has been posted in <#${introChannel.id}>.`;
+    
     await interaction.reply({
-        content: '✅ Welcome to ShipYard! Your introduction has been posted.',
-        ephemeral: true
+        content: successMessage,
+        flags: MessageFlags.Ephemeral
     });
 }
 
-async function processClinicRequest(interaction, bot) {
+async function processClinicRequest(interaction, bot, channelManager) {
     const goal = interaction.fields.getTextInputValue('goal');
     const draft = interaction.fields.getTextInputValue('draft');
     const questions = interaction.fields.getTextInputValue('questions').split('\n');
     const ask = interaction.fields.getTextInputValue('ask');
     
-    // Create clinic post
-    await bot.db.query(
-        `INSERT INTO clinics (author_id, goal, draft, questions, ask, status)
-         VALUES (?, ?, ?, ?, ?, 'open')`,
-        [interaction.user.id, goal, draft, questions, ask]
-    );
-    
-    // Get the inserted clinic ID
-    const result = await bot.db.query('SELECT last_insert_rowid() as id');
-    const clinicId = result.rows[0].id;
+    // Create temporary clinic ID for UI
+    const tempClinicId = `temp_${Date.now()}`;
     
     // Create embed
     const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
@@ -278,33 +323,78 @@ async function processClinicRequest(interaction, bot) {
             { name: '❓ Questions', value: questions.join('\n').substring(0, 1024) },
             { name: '🙏 What would help', value: ask }
         )
-        .setFooter({ text: `Clinic ID: ${clinicId}` })
+        .setFooter({ text: `Clinic ID: ${tempClinicId}` })
         .setTimestamp();
     
-    const helpfulButton = new ButtonBuilder()
-        .setCustomId(`helpful_${clinicId}`)
-        .setLabel('Mark as Helpful')
+    const resolvedButton = new ButtonBuilder()
+        .setCustomId(`resolved_${tempClinicId}`)
+        .setLabel('Mark as Resolved')
         .setStyle(ButtonStyle.Success)
         .setEmoji('✅');
     
-    const row = new ActionRowBuilder().addComponents(helpfulButton);
+    const row = new ActionRowBuilder().addComponents(resolvedButton);
     
-    // Post to clinic channel
-    const clinicChannel = interaction.guild.channels.cache.get(process.env.CLINIC_CHANNEL_ID);
-    const message = await clinicChannel.send({ 
-        embeds: [embed],
-        components: [row]
-    });
+    // Post to clinic channel using ChannelManager
+    const { message, channel: clinicChannel, usedFallback, error } = await channelManager.postMessage(
+        'CLINIC',
+        interaction,
+        { embeds: [embed], components: [row] }
+    );
+
+    if (!message) {
+        return interaction.reply({
+            content: `Unable to post feedback request: ${error}`,
+            ephemeral: true
+        });
+    }
     
-    // Update with message ID
-    await bot.db.query(
-        'UPDATE clinics SET message_id = ? WHERE id = ?',
-        [message.id, clinicId]
+    // Create clinic post in database with message_id
+    const result = await bot.db.query(
+        `INSERT INTO clinics (author_id, goal, draft, questions, ask, status, message_id)
+         VALUES (?, ?, ?, ?, ?, 'open', ?)`,
+        [interaction.user.id, goal, draft, JSON.stringify(questions), ask, message.id]
     );
     
+    const clinicId = result.lastID;
+    
+    // Update the embed and button with real clinic ID
+    const updatedEmbed = new EmbedBuilder()
+        .setColor(0x00FFFF)
+        .setTitle('💡 Feedback Request')
+        .setAuthor({ 
+            name: interaction.user.username,
+            iconURL: interaction.user.displayAvatarURL()
+        })
+        .addFields(
+            { name: '🎯 Goal', value: goal },
+            { name: '📝 Current Draft', value: draft.substring(0, 1024) },
+            { name: '❓ Questions', value: questions.join('\n').substring(0, 1024) },
+            { name: '🙏 What would help', value: ask }
+        )
+        .setFooter({ text: `Clinic ID: ${clinicId}` })
+        .setTimestamp();
+
+    const updatedResolvedButton = new ButtonBuilder()
+        .setCustomId(`resolved_${clinicId}`)
+        .setLabel('Mark as Resolved')
+        .setStyle(ButtonStyle.Success)
+        .setEmoji('✅');
+
+    const updatedRow = new ActionRowBuilder().addComponents(updatedResolvedButton);
+    
+    // Update the message with correct clinic ID
+    await message.edit({
+        embeds: [updatedEmbed],
+        components: [updatedRow]
+    });
+    
+    const successMessage = usedFallback 
+        ? 'Your feedback request has been posted in this channel!'
+        : `Your feedback request has been posted in <#${clinicChannel.id}>!`;
+    
     await interaction.reply({
-        content: 'Your feedback request has been posted!',
-        ephemeral: true
+        content: successMessage,
+        flags: MessageFlags.Ephemeral
     });
 }
 

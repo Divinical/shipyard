@@ -1,10 +1,12 @@
 // src/commands/admin/policy.js
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class PolicyCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('policy')
             .setDescription('Manage bot policies (Founder only)')
@@ -62,20 +64,22 @@ export default class PolicyCommand extends BaseCommand {
         );
 
         // Log to mod room
-        const modChannel = interaction.guild.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
-        if (modChannel) {
-            const embed = new EmbedBuilder()
-                .setColor(0xFFFF00)
-                .setTitle('⚙️ Policy Updated')
-                .setDescription(`${interaction.user} updated a policy`)
-                .addFields(
-                    { name: 'Key', value: key, inline: true },
-                    { name: 'Value', value: JSON.stringify(parsedValue), inline: true }
-                )
-                .setTimestamp();
-            
-            await modChannel.send({ embeds: [embed] });
-        }
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFF00)
+            .setTitle('⚙️ Policy Updated')
+            .setDescription(`${interaction.user} updated a policy`)
+            .addFields(
+                { name: 'Key', value: key, inline: true },
+                { name: 'Value', value: JSON.stringify(parsedValue), inline: true }
+            )
+            .setTimestamp();
+        
+        await this.channelManager.postMessage(
+            'MOD_ROOM',
+            interaction,
+            { embeds: [embed] },
+            false // Don't fallback for mod logs
+        );
     }
 
     async showPolicies(interaction) {

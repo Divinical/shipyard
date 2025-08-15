@@ -1,18 +1,20 @@
 // src/commands/moderation/meet.js
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 import moment from 'moment-timezone';
 
 export default class MeetCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('meet')
             .setDescription('Manage weekly meetings')
             .addSubcommand(subcommand =>
                 subcommand
                     .setName('create')
-                    .setDescription('Create a new weekly meet')
+                    .setDescription('Create a meeting - announcement will be posted in announcements channel')
                     .addStringOption(option =>
                         option
                             .setName('title')
@@ -21,7 +23,7 @@ export default class MeetCommand extends BaseCommand {
                     .addStringOption(option =>
                         option
                             .setName('datetime')
-                            .setDescription('Date and time (e.g., "2024-03-20 15:00")')
+                            .setDescription('Date and time (YYYY-MM-DD HH:MM format, e.g., "2024-03-20 15:00")')
                             .setRequired(true))
                     .addIntegerOption(option =>
                         option
@@ -87,8 +89,10 @@ export default class MeetCommand extends BaseCommand {
         const meetTime = moment.tz(datetime, 'YYYY-MM-DD HH:mm', timezone);
 
         if (!meetTime.isValid()) {
-            return this.sendError(interaction, 'Invalid date format. Use YYYY-MM-DD HH:mm');
+            return this.sendError(interaction, 'Invalid date format. Use YYYY-MM-DD HH:MM (e.g., "2024-12-25 14:30")');
         }
+
+        this.bot.logger.info(`Parsed meet time: ${datetime} -> ${meetTime.format()} (${meetTime.toISOString()})`);
 
         // Create meet in database
         const result = await this.db.query(
@@ -134,13 +138,16 @@ export default class MeetCommand extends BaseCommand {
 
         const row = new ActionRowBuilder().addComponents(yesButton, noButton, maybeButton);
 
-        // Post to announcements
-        const announcementsChannel = interaction.guild.channels.cache.get(process.env.ANNOUNCEMENTS_CHANNEL_ID);
-        const message = await announcementsChannel.send({ 
-            content: '@everyone',
-            embeds: [embed],
-            components: [row]
-        });
+        // Post to announcements using ChannelManager
+        const { message, channel: announcementsChannel, usedFallback, error } = await this.channelManager.postMessage(
+            'ANNOUNCEMENTS',
+            interaction,
+            { content: '@everyone', embeds: [embed], components: [row] }
+        );
+
+        if (!message) {
+            return await this.sendError(interaction, `Unable to post meeting announcement: ${error}`);
+        }
 
         // Update meet with RSVP message ID
         await this.db.query(
@@ -151,7 +158,11 @@ export default class MeetCommand extends BaseCommand {
         // Schedule reminders
         this.scheduleReminders(meetId, meetTime);
 
-        await this.sendSuccess(interaction, `Meeting created! RSVP posted in <#${process.env.ANNOUNCEMENTS_CHANNEL_ID}>`);
+        const successMessage = usedFallback 
+            ? 'Meeting created! RSVP posted in this channel.'
+            : `Meeting created! RSVP posted in <#${announcementsChannel.id}>.`;
+        
+        await this.sendSuccess(interaction, successMessage);
     }
 
     async closeMeet(interaction) {
@@ -240,28 +251,32 @@ export default class MeetCommand extends BaseCommand {
     }
 
     async listMeets(interaction) {
+        // Get all meetings (recent and upcoming)
         const meets = await this.db.query(
             `SELECT id, title, start_at, duration_mins, status
              FROM meets
-             WHERE start_at > datetime('now')
-             ORDER BY start_at
-             LIMIT 5`
+             ORDER BY start_at DESC
+             LIMIT 10`
         );
 
         if (meets.rows.length === 0) {
-            return interaction.reply('No upcoming meetings scheduled');
+            return interaction.reply('No meetings found');
         }
 
         const embed = new EmbedBuilder()
             .setColor(0x0099FF)
-            .setTitle('📅 Upcoming Meetings')
+            .setTitle('📅 Recent & Upcoming Meetings')
             .setTimestamp();
 
+        const now = new Date();
         for (const meet of meets.rows) {
             const meetTime = moment(meet.start_at);
+            const isPast = meetTime.toDate() < now;
+            const statusIcon = isPast ? '⏳' : '🕒';
+            
             embed.addFields({
-                name: `${meet.title} (ID: ${meet.id})`,
-                value: `📆 ${meetTime.format('MMM DD, HH:mm')} | ⏱️ ${meet.duration_mins}min | Status: ${meet.status}`
+                name: `${statusIcon} ${meet.title} (ID: ${meet.id})`,
+                value: `📆 ${meetTime.format('MMM DD, YYYY HH:mm')} | ⏱️ ${meet.duration_mins}min | Status: ${meet.status}`
             });
         }
 

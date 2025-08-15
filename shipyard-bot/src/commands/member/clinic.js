@@ -6,23 +6,23 @@ export default class ClinicCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
         this.data = new SlashCommandBuilder()
-            .setName('clinic')
-            .setDescription('Feedback clinic commands')
+            .setName('feedback')
+            .setDescription('Ask for feedback - your request will be posted in the feedback channel')
             .addSubcommand(subcommand =>
                 subcommand
-                    .setName('new')
-                    .setDescription('Request feedback on your work'));
+                    .setName('request')
+                    .setDescription('Ask for feedback on your project, design, or idea'));
     }
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
         
-        if (subcommand === 'new') {
-            await this.showClinicModal(interaction);
+        if (subcommand === 'request') {
+            await this.showFeedbackModal(interaction);
         }
     }
 
-    async showClinicModal(interaction) {
+    async showFeedbackModal(interaction) {
         // Check if user has given enough helpful feedback (2 in last 14 days)
         const twoWeeksAgo = new Date();
         twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
@@ -48,37 +48,38 @@ export default class ClinicCommand extends BaseCommand {
         // Create modal
         const modal = new ModalBuilder()
             .setCustomId('clinic_modal')
-            .setTitle('Request Feedback');
+            .setTitle('Ask for Feedback');
 
         const goalInput = new TextInputBuilder()
             .setCustomId('goal')
-            .setLabel('What are you trying to achieve?')
+            .setLabel('Your goal/project')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
             .setMaxLength(500);
 
         const draftInput = new TextInputBuilder()
             .setCustomId('draft')
-            .setLabel('Current draft/version')
+            .setLabel('What you have so far')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
             .setMaxLength(2000)
-            .setPlaceholder('Share your current work, code, design, or writing...');
+            .setPlaceholder('Paste your code, share a link to your design, describe what you built...');
 
         const questionsInput = new TextInputBuilder()
             .setCustomId('questions')
-            .setLabel('Specific questions (one per line)')
+            .setLabel('What feedback do you need?')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
             .setMaxLength(500)
-            .setPlaceholder('What specific feedback do you need?');
+            .setPlaceholder('Does this look good?\nHow can I make it better?\nAm I doing this right?');
 
         const askInput = new TextInputBuilder()
             .setCustomId('ask')
-            .setLabel('What would be most helpful?')
+            .setLabel('How can people help you?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(200);
+            .setMaxLength(200)
+            .setPlaceholder('Quick comments, detailed review, voice chat, etc.');
 
         const rows = [
             new ActionRowBuilder().addComponents(goalInput),

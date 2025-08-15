@@ -1,56 +1,58 @@
 // src/commands/member/help.js
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class HelpCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('help')
-            .setDescription('Request help from the community')
+            .setDescription('Ask for help - your request will be posted in the help channel')
             .addSubcommand(subcommand =>
                 subcommand
-                    .setName('need')
-                    .setDescription('Create a help request')
+                    .setName('request')
+                    .setDescription('Ask for help - someone will help you solve your problem')
                     .addStringOption(option =>
                         option
                             .setName('category')
-                            .setDescription('Type of help needed')
+                            .setDescription('What kind of help do you need?')
                             .setRequired(true)
                             .addChoices(
-                                { name: 'Code/Technical', value: 'technical' },
-                                { name: 'Design/UI/UX', value: 'design' },
-                                { name: 'Marketing/Growth', value: 'marketing' },
-                                { name: 'Product/Strategy', value: 'product' },
-                                { name: 'Other', value: 'other' }
+                                { name: 'Programming/Code - Help fixing bugs or writing code', value: 'technical' },
+                                { name: 'Design/UI/UX - Help making things look good', value: 'design' },
+                                { name: 'Marketing/Growth - Help getting users or customers', value: 'marketing' },
+                                { name: 'Product/Strategy - Help planning your project', value: 'product' },
+                                { name: 'Other - Different kind of help', value: 'other' }
                             ))
                     .addStringOption(option =>
                         option
                             .setName('summary')
-                            .setDescription('Brief description of what you need help with')
+                            .setDescription('Explain your problem in a few sentences')
                             .setRequired(true)
                             .setMaxLength(200))
                     .addStringOption(option =>
                         option
                             .setName('tags')
-                            .setDescription('Related skills/technologies (comma separated)')
+                            .setDescription('Technologies you are using (example: React, Python, Figma)')
                             .setRequired(false))
                     .addStringOption(option =>
                         option
                             .setName('urgency')
-                            .setDescription('How urgent is this?')
+                            .setDescription('How quickly do you need help?')
                             .setRequired(false)
                             .addChoices(
-                                { name: 'Low - Whenever someone has time', value: 'low' },
-                                { name: 'Normal - Within a few days', value: 'normal' },
-                                { name: 'High - Need help ASAP', value: 'high' }
+                                { name: 'Low - I can wait, no rush', value: 'low' },
+                                { name: 'Normal - Help within a few days would be great', value: 'normal' },
+                                { name: 'High - I need help right now please!', value: 'high' }
                             )));
     }
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
         
-        if (subcommand === 'need') {
+        if (subcommand === 'request') {
             await this.createHelpRequest(interaction);
         }
     }
@@ -61,16 +63,7 @@ export default class HelpCommand extends BaseCommand {
         const tags = interaction.options.getString('tags')?.split(',').map(t => t.trim()) || [];
         const urgency = interaction.options.getString('urgency') || 'normal';
 
-        // Create help request in database
-        const result = await this.db.query(
-            `INSERT INTO help_requests (author_id, category, tags, summary, urgency, status)
-             VALUES (?, ?, ?, ?, ?, 'open')`,
-            [interaction.user.id, category, JSON.stringify(tags), summary, urgency]
-        );
-
-        const requestId = result.lastID;
-
-        // Create embed
+        // Create embed first
         const urgencyColors = {
             low: 0x00FF00,
             normal: 0xFFFF00,
@@ -90,45 +83,96 @@ export default class HelpCommand extends BaseCommand {
                 { name: 'Summary', value: summary },
                 { name: 'Status', value: '🔴 Open', inline: true }
             )
-            .setFooter({ text: `Request ID: ${requestId}` })
             .setTimestamp();
 
         if (tags.length > 0) {
             embed.addFields({ name: 'Tags', value: tags.join(', '), inline: true });
         }
 
-        // Add "Mark as Solved" button
+        // Create temporary request ID for button
+        const tempRequestId = `temp_${Date.now()}`;
+        embed.setFooter({ text: `Request ID: ${tempRequestId}` });
+
         const solvedButton = new ButtonBuilder()
-            .setCustomId(`solved_${requestId}`)
+            .setCustomId(`solved_${tempRequestId}`)
             .setLabel('Mark as Solved')
             .setStyle(ButtonStyle.Success)
             .setEmoji('✅');
 
         const row = new ActionRowBuilder().addComponents(solvedButton);
 
-        // Post to help channel
-        const helpChannel = interaction.guild.channels.cache.get(process.env.HELP_CHANNEL_ID);
-        const message = await helpChannel.send({ 
-            embeds: [embed],
-            components: [row]
-        });
-
-        // Update database with message ID
-        await this.db.query(
-            'UPDATE help_requests SET message_id = ? WHERE id = ?',
-            [message.id, requestId]
+        // Post message using ChannelManager
+        const { message, channel: helpChannel, usedFallback, error } = await this.channelManager.postMessage(
+            'HELP',
+            interaction,
+            { embeds: [embed], components: [row] }
         );
+
+        if (!message) {
+            return await this.sendError(interaction, `Unable to post help request: ${error}`);
+        }
+
+        // Now create help request in database with message_id
+        const result = await this.db.query(
+            `INSERT INTO help_requests (author_id, category, tags, summary, urgency, status, message_id)
+             VALUES (?, ?, ?, ?, ?, 'open', ?)`,
+            [interaction.user.id, category, JSON.stringify(tags), summary, urgency, message.id]
+        );
+
+        const requestId = result.lastID;
+
+        // Update the embed with real request ID and button
+        const updatedEmbed = new EmbedBuilder()
+            .setColor(urgencyColors[urgency])
+            .setTitle('🆘 Help Request')
+            .setAuthor({ 
+                name: interaction.user.username,
+                iconURL: interaction.user.displayAvatarURL()
+            })
+            .addFields(
+                { name: 'Category', value: category, inline: true },
+                { name: 'Urgency', value: urgency.toUpperCase(), inline: true },
+                { name: 'Summary', value: summary },
+                { name: 'Status', value: '🔴 Open', inline: true }
+            )
+            .setFooter({ text: `Request ID: ${requestId}` })
+            .setTimestamp();
+
+        if (tags.length > 0) {
+            updatedEmbed.addFields({ name: 'Tags', value: tags.join(', '), inline: true });
+        }
+
+        const updatedSolvedButton = new ButtonBuilder()
+            .setCustomId(`solved_${requestId}`)
+            .setLabel('Mark as Solved')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅');
+
+        const updatedRow = new ActionRowBuilder().addComponents(updatedSolvedButton);
+
+        // Update the message with correct request ID
+        await message.edit({ 
+            embeds: [updatedEmbed],
+            components: [updatedRow]
+        });
 
         // Ping relevant roles based on tags
         const rolesToPing = this.getRelevantRoles(tags, category);
         if (rolesToPing.length > 0) {
-            await helpChannel.send({
-                content: `📢 ${rolesToPing.map(r => `<@&${r}>`).join(' ')}`,
-                allowedMentions: { roles: rolesToPing }
-            });
+            try {
+                await helpChannel.send({
+                    content: `📢 ${rolesToPing.map(r => `<@&${r}>`).join(' ')}`,
+                    allowedMentions: { roles: rolesToPing }
+                });
+            } catch (error) {
+                this.bot.logger.warn('Failed to ping roles for help request:', error);
+            }
         }
 
-        await this.sendSuccess(interaction, 'Your help request has been posted!');
+        await this.sendSuccess(
+            interaction, 
+            this.channelManager.getSuccessMessage('HELP', usedFallback, helpChannel, 'posted')
+        );
     }
 
     getRelevantRoles(tags, category) {

@@ -90,10 +90,16 @@ export class GamificationService {
 
     async startNewSeason() {
         const lengthWeeks = await this.bot.policyManager.get('season.length_weeks', 6);
+        const lengthWeeksNumber = parseInt(lengthWeeks) || 6; // Ensure it's a number
+        
+        this.bot.logger.info(`Starting new season with length: ${lengthWeeksNumber} weeks`);
+        
         const startDate = new Date();
         const endDate = new Date();
-        endDate.setDate(endDate.getDate() + (lengthWeeks * 7));
+        endDate.setDate(endDate.getDate() + (lengthWeeksNumber * 7));
 
+        this.bot.logger.info(`Season dates: start=${startDate.toISOString()}, end=${endDate.toISOString()}`);
+        
         const result = await this.db.query(
             `INSERT INTO seasons (start_date, end_date, status)
              VALUES (?, ?, 'active')`,
@@ -106,9 +112,9 @@ export class GamificationService {
         );
 
         // Announce new season
-        await this.announceNewSeason(newSeason);
+        await this.announceNewSeason(newSeason.rows[0]);
         
-        return newSeason;
+        return newSeason.rows[0];
     }
 
     async endCurrentSeason() {
@@ -148,7 +154,7 @@ export class GamificationService {
             [userId, weekKey]
         );
         
-        return parseInt(result?.total || 0);
+        return parseInt(result.rows[0]?.total || 0);
     }
 
     async checkWeeklyGoal(userId) {
@@ -162,7 +168,7 @@ export class GamificationService {
             [userId, weekKey]
         );
         
-        return parseInt(actions?.total || 0) >= requiredActions;
+        return parseInt(actions.rows[0]?.total || 0) >= requiredActions;
     }
 
     async updateWeeklyStreak(userId, achieved) {
@@ -201,7 +207,7 @@ export class GamificationService {
         );
         
         const actionCounts = {};
-        (counts || []).forEach(row => {
+        (counts.rows || []).forEach(row => {
             actionCounts[row.type] = parseInt(row.count);
         });
 
@@ -232,7 +238,7 @@ export class GamificationService {
             [userId]
         );
         
-        if (streakResult?.weekly_current >= 4) {
+        if (streakResult.rows[0]?.weekly_current >= 4) {
             badges.push('streak_4_weeks');
         }
 
@@ -251,7 +257,7 @@ export class GamificationService {
             [userId, badgeCode]
         );
         
-        if (existing) return;
+        if (existing.rows.length > 0) return;
 
         // Get badge ID
         const badge = await this.db.query(
@@ -259,13 +265,20 @@ export class GamificationService {
             [badgeCode]
         );
         
-        if (!badge) return;
+        if (badge.rows.length === 0) return;
+
+        // Ensure user exists in database first
+        await this.db.query(
+            `INSERT OR IGNORE INTO users (id, username, joined_at) 
+             VALUES (?, ?, ?)`,
+            [userId, '', new Date()]
+        );
 
         // Award badge
         const season = await this.getCurrentSeason();
         await this.db.query(
             'INSERT INTO user_badges (user_id, badge_id, season_id, awarded_at) VALUES (?, ?, ?, ?)',
-            [userId, badge.id, season?.id, new Date()]
+            [userId, badge.rows[0].id, season?.id, new Date()]
         );
 
         // Notify user
@@ -274,7 +287,7 @@ export class GamificationService {
             const embed = new EmbedBuilder()
                 .setColor(0xFFD700)
                 .setTitle('🏆 Badge Earned!')
-                .setDescription(`Congratulations! You've earned the **${badge.label}** badge!`)
+                .setDescription(`Congratulations! You've earned the **${badge.rows[0].label}** badge!`)
                 .setThumbnail('https://emojipedia-us.s3.amazonaws.com/thumbs/240/twitter/322/trophy_1f3c6.png')
                 .setTimestamp();
             
@@ -301,7 +314,7 @@ export class GamificationService {
             [userId]
         );
 
-        const { live_demos, helpful_clinics, active_weeks } = stats || { live_demos: 0, helpful_clinics: 0, active_weeks: 0 };
+        const { live_demos, helpful_clinics, active_weeks } = stats.rows[0] || { live_demos: 0, helpful_clinics: 0, active_weeks: 0 };
 
         // Check recent activity for Crew role
         const twoWeeksAgo = new Date();
@@ -316,7 +329,7 @@ export class GamificationService {
             [userId, twoWeeksAgo]
         );
 
-        const { recent_weeks, recent_clinics } = recentActivity || { recent_weeks: 0, recent_clinics: 0 };
+        const { recent_weeks, recent_clinics } = recentActivity.rows[0] || { recent_weeks: 0, recent_clinics: 0 };
 
         // Define role objects
         const crewRole = member.guild.roles.cache.find(r => r.name === 'Crew');
@@ -449,11 +462,11 @@ export class GamificationService {
         );
 
         return {
-            weekStats: weekStats || [],
-            seasonPoints: seasonPoints?.points || 0,
-            currentStreak: streaks?.weekly_current || 0,
-            bestStreak: streaks?.weekly_best || 0,
-            badges: badges || []
+            weekStats: weekStats.rows || [],
+            seasonPoints: seasonPoints.rows[0]?.points || 0,
+            currentStreak: streaks.rows[0]?.weekly_current || 0,
+            bestStreak: streaks.rows[0]?.weekly_best || 0,
+            badges: badges.rows || []
         };
     }
 }

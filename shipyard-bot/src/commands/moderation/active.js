@@ -1,5 +1,5 @@
 // src/commands/moderation/active.js
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
 
 export default class ActiveCommand extends BaseCommand {
@@ -40,7 +40,7 @@ export default class ActiveCommand extends BaseCommand {
             if (!checks.hasActivity) response += '• Weekly activity requirement\n';
         }
 
-        await interaction.reply({ content: response, ephemeral: true });
+        await interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
     }
 
     async checkActiveMemberStatus(userId) {

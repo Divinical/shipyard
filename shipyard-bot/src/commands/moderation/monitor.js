@@ -1,10 +1,12 @@
 // src/commands/moderation/monitor.js
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { BaseCommand } from '../BaseCommand.js';
+import { ChannelManager } from '../../utils/ChannelManager.js';
 
 export default class MonitorCommand extends BaseCommand {
     constructor(bot) {
         super(bot);
+        this.channelManager = new ChannelManager(bot);
         this.data = new SlashCommandBuilder()
             .setName('monitor')
             .setDescription('Activity monitoring commands')
@@ -133,14 +135,15 @@ export default class MonitorCommand extends BaseCommand {
 
         // Create removal queue in mod room if needed
         if (stats.removal > 0) {
-            const modChannel = interaction.guild.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
-            if (modChannel) {
-                const removalList = inactiveUsers.rows
-                    .filter(u => Math.floor((Date.now() - new Date(u.last_activity_at)) / (1000 * 60 * 60 * 24)) >= 28)
-                    .map(u => `• <@${u.id}> - Last active: ${new Date(u.last_activity_at).toLocaleDateString()}`)
-                    .join('\n');
+            const removalList = inactiveUsers.rows
+                .filter(u => Math.floor((Date.now() - new Date(u.last_activity_at)) / (1000 * 60 * 60 * 24)) >= 28)
+                .map(u => `• <@${u.id}> - Last active: ${new Date(u.last_activity_at).toLocaleDateString()}`)
+                .join('\n');
 
-                await modChannel.send({
+            await this.channelManager.postMessage(
+                'MOD_ROOM',
+                interaction,
+                {
                     content: '<@&Founder>',
                     embeds: [new EmbedBuilder()
                         .setColor(0xFF0000)
@@ -148,8 +151,9 @@ export default class MonitorCommand extends BaseCommand {
                         .setDescription(removalList)
                         .setFooter({ text: 'These users have been inactive for 28+ days' })
                         .setTimestamp()]
-                });
-            }
+                },
+                false // Don't fallback for mod notifications
+            );
         }
     }
 
