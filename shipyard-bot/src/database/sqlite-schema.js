@@ -1,7 +1,7 @@
 // SQLite simplified schema for ShipYard Bot
 export const SQLITE_MIGRATIONS = {
-    createUsersTable(db) {
-        return db.querySync(`
+    async createUsersTable(db) {
+        return await db.querySync(`
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -23,8 +23,8 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createMessagesTable(db) {
-        return db.querySync(`
+    async createMessagesTable(db) {
+        return await db.querySync(`
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT REFERENCES users(id),
@@ -36,8 +36,8 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createMeetsTable(db) {
-        db.querySync(`
+    async createMeetsTable(db) {
+        await db.querySync(`
             CREATE TABLE IF NOT EXISTS meets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -50,7 +50,7 @@ export const SQLITE_MIGRATIONS = {
             )
         `);
 
-        db.querySync(`
+        await db.querySync(`
             CREATE TABLE IF NOT EXISTS meet_rsvps (
                 meet_id INTEGER REFERENCES meets(id),
                 user_id TEXT REFERENCES users(id),
@@ -60,7 +60,7 @@ export const SQLITE_MIGRATIONS = {
             )
         `);
 
-        return db.querySync(`
+        return await db.querySync(`
             CREATE TABLE IF NOT EXISTS meet_attendance (
                 meet_id INTEGER REFERENCES meets(id),
                 user_id TEXT REFERENCES users(id),
@@ -71,8 +71,8 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createGamificationTables(db) {
-        db.querySync(`
+    async createGamificationTables(db) {
+        await db.querySync(`
             CREATE TABLE IF NOT EXISTS seasons (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 start_date DATE NOT NULL,
@@ -138,8 +138,8 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createPoliciesTable(db) {
-        db.querySync(`
+    async createPoliciesTable(db) {
+        await db.querySync(`
             CREATE TABLE IF NOT EXISTS policies (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -148,7 +148,7 @@ export const SQLITE_MIGRATIONS = {
         `);
 
         // Insert default policies
-        return db.querySync(`
+        return await db.querySync(`
             INSERT OR IGNORE INTO policies (key, value) VALUES
                 ('gamification.enabled', '"true"'),
                 ('season.length_weeks', '"6"'),
@@ -165,7 +165,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createClinicsTable(db) {
+    async createClinicsTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS clinics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,7 +184,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createHelpRequestsTable(db) {
+    async createHelpRequestsTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS help_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,7 +203,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createDemosTable(db) {
+    async createDemosTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS demos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,7 +219,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createKudosTable(db) {
+    async createKudosTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS kudos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,7 +234,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createReportsTable(db) {
+    async createReportsTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,7 +254,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createConsentsTable(db) {
+    async createConsentsTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS consents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -270,7 +270,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createAnalyticsSnapshotsTable(db) {
+    async createAnalyticsSnapshotsTable(db) {
         return db.querySync(`
             CREATE TABLE IF NOT EXISTS analytics_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -284,7 +284,7 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
-    createIndexes(db) {
+    async createIndexes(db) {
         const indexes = [
             // Users indexes - Enhanced for common queries
             'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
@@ -393,7 +393,7 @@ export const SQLITE_MIGRATIONS = {
         }
     },
 
-    optimizePragmas(db) {
+    async optimizePragmas(db) {
         // SQLite performance optimizations
         const pragmas = [
             // WAL mode for better concurrency and performance
@@ -439,7 +439,7 @@ export const SQLITE_MIGRATIONS = {
         }
     },
 
-    scheduleMaintenanceTasks(db) {
+    async scheduleMaintenanceTasks(db) {
         // These should be run periodically for optimal performance
         const maintenanceTasks = [
             'PRAGMA incremental_vacuum',

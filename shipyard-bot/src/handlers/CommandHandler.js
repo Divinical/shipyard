@@ -14,7 +14,9 @@ export class CommandHandler {
 
     async loadCommands() {
         const commandsPath = join(__dirname, '../commands');
-        const commandCategories = readdirSync(commandsPath);
+        const commandCategories = readdirSync(commandsPath, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
 
         for (const category of commandCategories) {
             const categoryPath = join(commandsPath, category);
