@@ -23,12 +23,16 @@ export default class GrantCommand extends BaseCommand {
                             .setDescription('Badge code to grant')
                             .setRequired(true)
                             .addChoices(
-                                { name: 'First Dock', value: 'first_dock' },
+                                { name: 'First Ship', value: 'first_dock' },
                                 { name: 'First Demo', value: 'first_demo' },
-                                { name: 'Clinic Helper', value: 'clinic_helper_5' },
+                                { name: 'Feedback Helper', value: 'clinic_helper_5' },
                                 { name: 'Problem Solver', value: 'problem_solver_5' },
                                 { name: '4 Week Streak', value: 'streak_4_weeks' },
-                                { name: 'Meet Regular', value: 'meet_regular_4' }
+                                { name: 'Meet Regular', value: 'meet_regular_4' },
+                                { name: 'Season Winner', value: 'season_winner' },
+                                { name: 'Early Bird', value: 'early_bird' },
+                                { name: 'Mentor', value: 'mentor' },
+                                { name: 'Shipped', value: 'shipped' }
                             )))
             .addSubcommand(subcommand =>
                 subcommand

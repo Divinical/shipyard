@@ -16,9 +16,9 @@ async function seed() {
         
         // Seed badges if they don't exist
         const badges = [
-            { code: 'first_dock', label: 'First Dock', description: 'Posted your first Dock Check' },
+            { code: 'first_dock', label: 'First Ship', description: 'Posted your first Dock Check' },
             { code: 'first_demo', label: 'First Demo', description: 'Posted your first demo' },
-            { code: 'clinic_helper_5', label: 'Clinic Helper', description: 'Gave 5 helpful feedback responses' },
+            { code: 'clinic_helper_5', label: 'Feedback Helper', description: 'Gave 5 helpful feedback responses' },
             { code: 'problem_solver_5', label: 'Problem Solver', description: 'Solved 5 help requests' },
             { code: 'streak_4_weeks', label: '4 Week Streak', description: 'Maintained a 4-week activity streak' },
             { code: 'meet_regular_4', label: 'Meet Regular', description: 'Attended 4 weekly meetings' },
