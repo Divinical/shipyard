@@ -86,32 +86,36 @@ export class PermissionUtils {
 
     static canExecuteCommand(member, commandName) {
         const commandPermissions = {
-            // Admin commands
+            // User-visible commands (available to all members)
+            'away': ['Member', 'New Member'],
+            'clinic': ['Member', 'New Member'], // feedback request
+            'help': ['Member', 'New Member'], // request
+            'export': ['Member', 'New Member'],
+            'kudos': ['Member', 'New Member'], // thanks
+            'start': ['Member', 'New Member'], // introduce
+            'meet': ['Member', 'New Member'], // Now available to all users
+            
+            // Admin commands (Founder only)
             'policy': ['Founder'],
             'freeze': ['Founder'],
             'grant': ['Founder'],
             'promote': ['Founder'],
             'health': ['Founder'],
+            'setup-badges': ['Founder'],
+            'edit-intro': ['Founder'],
             
-            // Moderation commands
+            // Moderation commands (keep existing Mod + Founder permissions)
             'active': ['Founder', 'Mod'],
-            'meet': ['Founder', 'Mod'],
             'monitor': ['Founder', 'Mod'],
             'guardrails': ['Founder', 'Mod'],
             'record': ['Founder', 'Mod'],
-            'report': ['Member'], // Anyone can report, but review needs mod
             
-            // Member commands - any member can use
-            'start': ['Member', 'New Member'],
-            'away': ['Member'],
-            'clinic': ['Member'],
-            'help': ['Member'],
-            'kudos': ['Member'],
-            'rank': ['Member'],
-            'badges': ['Member'],
-            'season': ['Member'],
-            'export': ['Member'],
-            'delete': ['Member']
+            // Other commands now restricted to Founder only
+            'report': ['Founder'],
+            'rank': ['Founder'],
+            'badges': ['Founder'],
+            'season': ['Founder'],
+            'delete': ['Founder']
         };
 
         const requiredRoles = commandPermissions[commandName];

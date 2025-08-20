@@ -53,7 +53,10 @@
                   await SQLITE_MIGRATIONS.createPoliciesTable(this);
               });
 
-              // Create indexes (separate transaction)
+              // Apply forum channel database updates (schema migrations) - MUST run before indexes
+              await SQLITE_MIGRATIONS.updateTablesForForumChannels(this);
+
+              // Create indexes (separate transaction) - runs after thread_id columns are added
               await SQLITE_MIGRATIONS.createIndexes(this);
 
               // Apply PRAGMA optimizations (MUST be outside transaction)

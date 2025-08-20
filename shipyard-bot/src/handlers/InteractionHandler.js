@@ -1,11 +1,13 @@
 // src/handlers/InteractionHandler.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ChannelManager } from '../utils/ChannelManager.js';
 
 export class InteractionHandler {
     constructor(bot) {
         this.bot = bot;
         this.db = bot.db;
         this.logger = bot.logger;
+        this.channelManager = new ChannelManager(bot);
     }
 
     async handleButton(interaction) {
@@ -38,13 +40,21 @@ export class InteractionHandler {
     }
 
     async handleModal(interaction) {
-        const [type, ...params] = interaction.customId.split('_');
+        const customIdParts = interaction.customId.split('_');
+        const [type, ...params] = customIdParts;
         
+        this.logger.info(`Processing modal: ${interaction.customId}, type: ${type}, params: ${params}`);
+
         const handlers = {
             'onboarding': () => this.processOnboarding(interaction),
             'clinic': () => this.processClinic(interaction),
             'report': () => this.processReport(interaction, params)
         };
+
+        // Handle full custom IDs like "onboarding_modal"
+        if (interaction.customId === 'onboarding_modal') {
+            return handlers.onboarding();
+        }
 
         const handler = handlers[type];
         if (handler) {
@@ -57,6 +67,8 @@ export class InteractionHandler {
                     ephemeral: true
                 });
             }
+        } else {
+            this.logger.warn(`Unknown modal type: ${type} from customId: ${interaction.customId}`);
         }
     }
 
@@ -280,10 +292,10 @@ export class InteractionHandler {
     // Modal Handlers
     async processOnboarding(interaction) {
         const data = {
-            name: interaction.fields.getTextInputValue('name'),
+            name: interaction.fields.getTextInputValue('username'),
             timezone: interaction.fields.getTextInputValue('timezone'),
-            oneliner: interaction.fields.getTextInputValue('oneliner'),
-            project: interaction.fields.getTextInputValue('project'),
+            oneliner: interaction.fields.getTextInputValue('offer'),
+            project: interaction.fields.getTextInputValue('x_profile'),
             skills: interaction.fields.getTextInputValue('skills').split(',').map(s => s.trim())
         };
 
@@ -308,7 +320,7 @@ export class InteractionHandler {
             .setTimestamp();
 
         if (data.project) {
-            introEmbed.addFields({ name: '🚀 Projects', value: data.project });
+            introEmbed.addFields({ name: '🐦 X Profile', value: data.project });
         }
 
         // Post to introductions
@@ -322,12 +334,12 @@ export class InteractionHandler {
 
         const introMessage = await introChannel.send({ embeds: [introEmbed] });
 
-        // Update user record
+        // Update user record with all fields
         await this.db.query(
             `UPDATE users 
-             SET timezone = ?, skills = ?, intro_post_id = ?
+             SET username = ?, timezone = ?, offer = ?, x_profile = ?, skills = ?, intro_post_id = ?
              WHERE id = ?`,
-            [data.timezone, this.db.formatArray(data.skills), introMessage.id, interaction.user.id]
+            [data.name, data.timezone, data.oneliner, data.project, this.db.formatArray(data.skills), introMessage.id, interaction.user.id]
         );
 
         // Complete onboarding
@@ -361,15 +373,18 @@ export class InteractionHandler {
             ask: interaction.fields.getTextInputValue('ask')
         };
 
-        // Create clinic in database
+        // Generate forum post title and tags
+        const postTitle = `Feedback: ${data.goal.length > 50 ? data.goal.slice(0, 47) + '...' : data.goal}`;
+        const forumTags = this.generateFeedbackForumTags(data);
+
+        // Create clinic in database first (without message_id)
         await this.db.query(
             `INSERT INTO clinics (author_id, goal, draft, questions, ask, status)
              VALUES (?, ?, ?, ?, ?, 'open')`,
-            [interaction.user.id, data.goal, data.draft, data.questions, data.ask]
+            [interaction.user.id, data.goal, data.draft, JSON.stringify(data.questions), data.ask]
         );
         
         const result = await this.db.query('SELECT last_insert_rowid() as id');
-
         const clinicId = result.rows[0].id;
 
         // Create embed
@@ -398,28 +413,30 @@ export class InteractionHandler {
 
         const row = new ActionRowBuilder().addComponents(helpfulButton);
 
-        // Post to clinic channel
-        const clinicChannel = interaction.guild.channels.cache.get(process.env.CLINIC_CHANNEL_ID);
-        if (!clinicChannel) {
+        // Post to forum channel using ChannelManager
+        const { thread, message, channel: clinicChannel, usedFallback, error } = await this.channelManager.postToForumChannel(
+            'CLINIC',
+            interaction,
+            postTitle,
+            { embeds: [embed], components: [row] },
+            forumTags
+        );
+
+        if (!message) {
             return interaction.reply({
-                content: '❌ Clinic channel not found. Please contact a moderator.',
+                content: `❌ Unable to post feedback request: ${error}`,
                 ephemeral: true
             });
         }
 
-        const message = await clinicChannel.send({ 
-            embeds: [embed],
-            components: [row]
-        });
-
-        // Update with message ID
+        // Update with message ID and thread ID
         await this.db.query(
-            'UPDATE clinics SET message_id = ? WHERE id = ?',
-            [message.id, clinicId]
+            'UPDATE clinics SET message_id = ?, thread_id = ? WHERE id = ?',
+            [message.id, thread?.id, clinicId]
         );
 
         await interaction.reply({
-            content: '✅ Your feedback request has been posted!',
+            content: this.channelManager.getSuccessMessage('CLINIC', usedFallback, clinicChannel, 'posted', !!thread),
             ephemeral: true
         });
     }
@@ -541,4 +558,48 @@ export class InteractionHandler {
             ephemeral: true
         });
     }
+
+    /**
+     * Generate forum tags for feedback requests
+     * @param {Object} feedbackData - Feedback request data
+     * @returns {Array<string>} Array of forum tag names
+     */
+    generateFeedbackForumTags(feedbackData) {
+        const forumTags = ['Feedback Request']; // Always add this tag
+
+        // Analyze the goal and draft to determine what kind of feedback
+        const content = `${feedbackData.goal} ${feedbackData.draft} ${feedbackData.questions.join(' ')}`.toLowerCase();
+
+        // Category detection based on keywords
+        if (content.includes('design') || content.includes('ui') || content.includes('ux') || 
+            content.includes('interface') || content.includes('visual') || content.includes('color') ||
+            content.includes('layout') || content.includes('figma')) {
+            forumTags.push('Design Review');
+        }
+
+        if (content.includes('code') || content.includes('function') || content.includes('bug') ||
+            content.includes('error') || content.includes('syntax') || content.includes('algorithm') ||
+            content.includes('programming') || content.includes('development')) {
+            forumTags.push('Code Review');
+        }
+
+        if (content.includes('product') || content.includes('feature') || content.includes('user') ||
+            content.includes('market') || content.includes('strategy') || content.includes('business') ||
+            content.includes('idea') || content.includes('concept')) {
+            forumTags.push('Product Strategy');
+        }
+
+        if (content.includes('ui') || content.includes('ux') || content.includes('user experience') ||
+            content.includes('usability') || content.includes('mobile') || content.includes('app')) {
+            forumTags.push('UI/UX');
+        }
+
+        // If no specific category was detected, add General
+        if (forumTags.length === 1) {
+            forumTags.push('General');
+        }
+
+        return forumTags;
+    },
+
 }

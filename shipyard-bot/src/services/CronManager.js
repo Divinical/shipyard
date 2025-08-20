@@ -70,12 +70,22 @@ export class CronManager {
         const embed = new EmbedBuilder()
             .setColor(0x0099FF)
             .setTitle('⚓ Daily Dock Check')
-            .setDescription('What\'s your plan for today? → What did you accomplish?')
+            .setDescription('**Daily accountability check-in for ShipYard members**\n\nStart your morning by sharing your plans, then return in the evening to update with your accomplishments. This helps build consistency and keeps the community engaged with your progress!')
             .addFields(
-                { name: '🎯 Morning', value: 'Share what you plan to work on today' },
-                { name: '✅ Evening', value: 'Update with what you accomplished' }
+                { 
+                    name: '🌅 Morning Check-in', 
+                    value: '• What are you planning to work on today?\n• Any specific goals or milestones?\n• What challenges do you expect?' 
+                },
+                { 
+                    name: '🌙 Evening Update', 
+                    value: '• What did you accomplish today?\n• Any wins, learnings, or blockers?\n• How do you feel about today\'s progress?' 
+                },
+                {
+                    name: '💡 Tips',
+                    value: '• Reply to this thread anytime during the day\n• Both morning and evening updates are encouraged but not required\n• Share wins, struggles, and everything in between!'
+                }
             )
-            .setFooter({ text: 'Reply in this thread to log your dock check!' })
+            .setFooter({ text: 'Building consistency, one day at a time! 🚀' })
             .setTimestamp();
 
         await thread.send({ embeds: [embed] });

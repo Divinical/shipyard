@@ -63,6 +63,12 @@ export default class HelpCommand extends BaseCommand {
         const tags = interaction.options.getString('tags')?.split(',').map(t => t.trim()) || [];
         const urgency = interaction.options.getString('urgency') || 'normal';
 
+        // Generate forum post title
+        const postTitle = `Help: ${summary.length > 50 ? summary.slice(0, 47) + '...' : summary}`;
+        
+        // Generate forum tags based on category, urgency, and tech stack
+        const forumTags = this.generateForumTags(category, urgency, tags);
+
         // Create embed first
         const urgencyColors = {
             low: 0x00FF00,
@@ -101,22 +107,24 @@ export default class HelpCommand extends BaseCommand {
 
         const row = new ActionRowBuilder().addComponents(solvedButton);
 
-        // Post message using ChannelManager
-        const { message, channel: helpChannel, usedFallback, error } = await this.channelManager.postMessage(
+        // Post to forum channel using ChannelManager
+        const { thread, message, channel: helpChannel, usedFallback, error } = await this.channelManager.postToForumChannel(
             'HELP',
             interaction,
-            { embeds: [embed], components: [row] }
+            postTitle,
+            { embeds: [embed], components: [row] },
+            forumTags
         );
 
         if (!message) {
             return await this.sendError(interaction, `Unable to post help request: ${error}`);
         }
 
-        // Now create help request in database with message_id
+        // Create help request in database with message_id and thread_id
         const result = await this.db.query(
-            `INSERT INTO help_requests (author_id, category, tags, summary, urgency, status, message_id)
-             VALUES (?, ?, ?, ?, ?, 'open', ?)`,
-            [interaction.user.id, category, JSON.stringify(tags), summary, urgency, message.id]
+            `INSERT INTO help_requests (author_id, category, tags, summary, urgency, status, message_id, thread_id)
+             VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`,
+            [interaction.user.id, category, JSON.stringify(tags), summary, urgency, message.id, thread?.id]
         );
 
         const requestId = result.lastID;
@@ -156,11 +164,12 @@ export default class HelpCommand extends BaseCommand {
             components: [updatedRow]
         });
 
-        // Ping relevant roles based on tags
+        // Ping relevant roles based on tags - post in thread if forum channel, otherwise in main channel
         const rolesToPing = this.getRelevantRoles(tags, category);
         if (rolesToPing.length > 0) {
             try {
-                await helpChannel.send({
+                const channelToPing = thread || helpChannel; // Use thread if it exists, otherwise main channel
+                await channelToPing.send({
                     content: `📢 ${rolesToPing.map(r => `<@&${r}>`).join(' ')}`,
                     allowedMentions: { roles: rolesToPing }
                 });
@@ -171,7 +180,7 @@ export default class HelpCommand extends BaseCommand {
 
         await this.sendSuccess(
             interaction, 
-            this.channelManager.getSuccessMessage('HELP', usedFallback, helpChannel, 'posted')
+            this.channelManager.getSuccessMessage('HELP', usedFallback, helpChannel, 'posted', !!thread)
         );
     }
 
@@ -198,5 +207,58 @@ export default class HelpCommand extends BaseCommand {
         }
 
         return roles;
+    }
+
+    /**
+     * Generate forum tags based on help request details
+     * @param {string} category - Help category
+     * @param {string} urgency - Urgency level
+     * @param {Array<string>} techTags - Technology tags from user input
+     * @returns {Array<string>} Array of forum tag names
+     */
+    generateForumTags(category, urgency, techTags) {
+        const forumTags = [];
+
+        // Add category tag
+        const categoryMap = {
+            'technical': 'Programming',
+            'design': 'Design',
+            'marketing': 'Marketing',
+            'product': 'Product',
+            'other': 'Other'
+        };
+        
+        const categoryTag = categoryMap[category];
+        if (categoryTag) {
+            forumTags.push(categoryTag);
+        }
+
+        // Add urgency tag
+        const urgencyMap = {
+            'low': 'low',
+            'normal': 'normal', 
+            'high': 'high'
+        };
+
+        const urgencyTag = urgencyMap[urgency];
+        if (urgencyTag) {
+            forumTags.push(urgencyTag);
+        }
+
+        // Add technology tags (first few to avoid hitting Discord limits)
+        const commonTechTags = ['React', 'Python', 'JavaScript', 'Node.js', 'TypeScript', 'Vue', 'Angular', 'CSS', 'HTML', 'PHP', 'Java', 'C#', 'Go', 'Rust'];
+        
+        for (const techTag of techTags.slice(0, 3)) { // Limit to first 3 tech tags
+            const normalizedTag = techTag.trim();
+            // Check if it matches any common tech tags (case insensitive)
+            const matchedTag = commonTechTags.find(tag => 
+                tag.toLowerCase() === normalizedTag.toLowerCase()
+            );
+            if (matchedTag) {
+                forumTags.push(matchedTag);
+            }
+        }
+
+        return forumTags;
     }
 }

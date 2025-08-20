@@ -322,6 +322,7 @@ export const SQLITE_MIGRATIONS = {
             'CREATE INDEX IF NOT EXISTS idx_clinics_message_id ON clinics(message_id)',
             'CREATE INDEX IF NOT EXISTS idx_clinics_status ON clinics(status)',
             'CREATE INDEX IF NOT EXISTS idx_clinics_created_at ON clinics(created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_clinics_thread_id ON clinics(thread_id)',
             
             // Help requests indexes
             'CREATE INDEX IF NOT EXISTS idx_help_requests_author_id ON help_requests(author_id)',
@@ -329,6 +330,7 @@ export const SQLITE_MIGRATIONS = {
             'CREATE INDEX IF NOT EXISTS idx_help_requests_status ON help_requests(status)',
             'CREATE INDEX IF NOT EXISTS idx_help_requests_urgency ON help_requests(urgency)',
             'CREATE INDEX IF NOT EXISTS idx_help_requests_solved_by ON help_requests(solved_by)',
+            'CREATE INDEX IF NOT EXISTS idx_help_requests_thread_id ON help_requests(thread_id)',
             
             // Demos indexes
             'CREATE INDEX IF NOT EXISTS idx_demos_author_id ON demos(author_id)',
@@ -453,6 +455,44 @@ export const SQLITE_MIGRATIONS = {
             } catch (error) {
                 console.warn(`Failed to run maintenance task: ${task}`, error.message);
             }
+        }
+    },
+
+    async updateTablesForForumChannels(db) {
+        console.log('🔄 Checking for forum channel database updates...');
+        
+        try {
+            // Add thread_id column to help_requests table
+            console.log('➕ Adding thread_id column to help_requests table...');
+            try {
+                await db.querySync('ALTER TABLE help_requests ADD COLUMN thread_id TEXT NULL');
+                console.log('✅ Added thread_id to help_requests');
+            } catch (error) {
+                if (error.message && error.message.includes('duplicate column name')) {
+                    console.log('ℹ️  thread_id already exists in help_requests');
+                } else {
+                    throw error; // Re-throw non-duplicate column errors
+                }
+            }
+            
+            // Add thread_id column to clinics table
+            console.log('➕ Adding thread_id column to clinics table...');
+            try {
+                await db.querySync('ALTER TABLE clinics ADD COLUMN thread_id TEXT NULL');
+                console.log('✅ Added thread_id to clinics');
+            } catch (error) {
+                if (error.message && error.message.includes('duplicate column name')) {
+                    console.log('ℹ️  thread_id already exists in clinics');
+                } else {
+                    throw error; // Re-throw non-duplicate column errors
+                }
+            }
+            
+            console.log('✅ Forum channel database updates completed');
+            
+        } catch (error) {
+            console.error('❌ Forum channel migration failed:', error);
+            throw error;
         }
     }
 };

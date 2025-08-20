@@ -1,6 +1,7 @@
 // src/events/interactionCreate.js
 import { Events, MessageFlags } from 'discord.js';
 import { ChannelManager } from '../utils/ChannelManager.js';
+import { WelcomeCardService } from '../services/WelcomeCardService.js';
 
 export default {
     name: Events.InteractionCreate,
@@ -232,39 +233,24 @@ async function handleModalSubmit(interaction, bot, channelManager) {
 }
 
 async function processOnboarding(interaction, bot, channelManager) {
-    const name = interaction.fields.getTextInputValue('name');
+    const welcomeCardService = new WelcomeCardService(bot);
+    
+    const name = interaction.fields.getTextInputValue('username');
     const timezone = interaction.fields.getTextInputValue('timezone');
-    const oneliner = interaction.fields.getTextInputValue('oneliner');
-    const project = interaction.fields.getTextInputValue('project');
+    const oneliner = interaction.fields.getTextInputValue('offer');
+    const project = interaction.fields.getTextInputValue('x_profile');
     const skills = interaction.fields.getTextInputValue('skills').split(',').map(s => s.trim());
     
-    // Create intro card
-    const { EmbedBuilder } = await import('discord.js');
-    const introEmbed = new EmbedBuilder()
-        .setColor(0x00FF00)
-        .setTitle(`👋 Welcome ${name}!`)
-        .setDescription(oneliner)
-        .addFields(
-            { name: '🌍 Timezone', value: timezone, inline: true },
-            { name: '🔨 Skills', value: skills.join(', '), inline: false }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL())
-        .setTimestamp();
-    
-    if (project) {
-        introEmbed.addFields({ name: '🚀 Projects', value: project });
-    }
-    
-    // Post to introductions using ChannelManager
-    const { message: introMessage, channel: introChannel, usedFallback, error } = await channelManager.postMessage(
+    // Get intro channel for API-generated welcome card
+    const { channel: introChannel, usedFallback, errorMessage } = await channelManager.getChannel(
         'INTRO',
         interaction,
-        { embeds: [introEmbed] }
+        false
     );
 
-    if (!introMessage) {
+    if (!introChannel) {
         return interaction.reply({
-            content: `Unable to post introduction: ${error}`,
+            content: `Unable to find introduction channel: ${errorMessage}`,
             ephemeral: true
         });
     }
@@ -278,9 +264,9 @@ async function processOnboarding(interaction, bot, channelManager) {
     
     await bot.db.query(
         `UPDATE users 
-         SET timezone = ?, skills = ?, intro_post_id = ?
+         SET username = ?, timezone = ?, offer = ?, x_profile = ?, skills = ?
          WHERE id = ?`,
-        [timezone, bot.db.formatArray(skills), introMessage.id, interaction.user.id]
+        [name, timezone, oneliner, project, bot.db.formatArray(skills), interaction.user.id]
     );
     
     // Add Member role
@@ -289,6 +275,7 @@ async function processOnboarding(interaction, bot, channelManager) {
         await interaction.member.roles.add(memberRole);
     }
     
+    // Reply to user immediately to avoid timeout
     const successMessage = usedFallback 
         ? '✅ Welcome to ShipYard! Your introduction has been posted in this channel.'
         : `✅ Welcome to ShipYard! Your introduction has been posted in <#${introChannel.id}>.`;
@@ -297,13 +284,26 @@ async function processOnboarding(interaction, bot, channelManager) {
         content: successMessage,
         flags: MessageFlags.Ephemeral
     });
+    
+    // Generate and send introduction card in background (don't await to avoid timeout)
+    const formData = { name, timezone, x_profile: project, skills };
+    const introCardData = welcomeCardService.generateIntroductionData(interaction.user, formData);
+    
+    // Process welcome card asynchronously
+    welcomeCardService.sendIntroductionCard(introChannel, introCardData).catch(error => {
+        bot.logger.error('Failed to send introduction card:', error);
+    });
 }
 
 async function processClinicRequest(interaction, bot, channelManager) {
     const goal = interaction.fields.getTextInputValue('goal');
     const draft = interaction.fields.getTextInputValue('draft');
-    const questions = interaction.fields.getTextInputValue('questions').split('\n');
+    const questions = interaction.fields.getTextInputValue('questions').split('\n').filter(q => q.trim());
     const ask = interaction.fields.getTextInputValue('ask');
+    
+    // Generate forum post title and tags
+    const postTitle = `Feedback: ${goal.length > 50 ? goal.slice(0, 47) + '...' : goal}`;
+    const forumTags = generateFeedbackForumTags({ goal, draft, questions, ask });
     
     // Create temporary clinic ID for UI
     const tempClinicId = `temp_${Date.now()}`;
@@ -326,19 +326,21 @@ async function processClinicRequest(interaction, bot, channelManager) {
         .setFooter({ text: `Clinic ID: ${tempClinicId}` })
         .setTimestamp();
     
-    const resolvedButton = new ButtonBuilder()
-        .setCustomId(`resolved_${tempClinicId}`)
-        .setLabel('Mark as Resolved')
+    const helpfulButton = new ButtonBuilder()
+        .setCustomId(`helpful_${tempClinicId}`)
+        .setLabel('Mark as Helpful')
         .setStyle(ButtonStyle.Success)
         .setEmoji('✅');
     
-    const row = new ActionRowBuilder().addComponents(resolvedButton);
+    const row = new ActionRowBuilder().addComponents(helpfulButton);
     
-    // Post to clinic channel using ChannelManager
-    const { message, channel: clinicChannel, usedFallback, error } = await channelManager.postMessage(
+    // Post to forum channel using ChannelManager
+    const { thread, message, channel: clinicChannel, usedFallback, error } = await channelManager.postToForumChannel(
         'CLINIC',
         interaction,
-        { embeds: [embed], components: [row] }
+        postTitle,
+        { embeds: [embed], components: [row] },
+        forumTags
     );
 
     if (!message) {
@@ -348,11 +350,11 @@ async function processClinicRequest(interaction, bot, channelManager) {
         });
     }
     
-    // Create clinic post in database with message_id
+    // Create clinic post in database with message_id and thread_id
     const result = await bot.db.query(
-        `INSERT INTO clinics (author_id, goal, draft, questions, ask, status, message_id)
-         VALUES (?, ?, ?, ?, ?, 'open', ?)`,
-        [interaction.user.id, goal, draft, JSON.stringify(questions), ask, message.id]
+        `INSERT INTO clinics (author_id, goal, draft, questions, ask, status, message_id, thread_id)
+         VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`,
+        [interaction.user.id, goal, draft, JSON.stringify(questions), ask, message.id, thread?.id]
     );
     
     const clinicId = result.lastID;
@@ -374,13 +376,13 @@ async function processClinicRequest(interaction, bot, channelManager) {
         .setFooter({ text: `Clinic ID: ${clinicId}` })
         .setTimestamp();
 
-    const updatedResolvedButton = new ButtonBuilder()
-        .setCustomId(`resolved_${clinicId}`)
-        .setLabel('Mark as Resolved')
+    const updatedHelpfulButton = new ButtonBuilder()
+        .setCustomId(`helpful_${clinicId}`)
+        .setLabel('Mark as Helpful')
         .setStyle(ButtonStyle.Success)
         .setEmoji('✅');
 
-    const updatedRow = new ActionRowBuilder().addComponents(updatedResolvedButton);
+    const updatedRow = new ActionRowBuilder().addComponents(updatedHelpfulButton);
     
     // Update the message with correct clinic ID
     await message.edit({
@@ -390,7 +392,7 @@ async function processClinicRequest(interaction, bot, channelManager) {
     
     const successMessage = usedFallback 
         ? 'Your feedback request has been posted in this channel!'
-        : `Your feedback request has been posted in <#${clinicChannel.id}>!`;
+        : `Your feedback request has been posted in <#${clinicChannel.id}>${thread ? ' (in a new thread)' : ''}!`;
     
     await interaction.reply({
         content: successMessage,
@@ -468,4 +470,47 @@ async function handleSelectMenu(interaction, bot) {
             ephemeral: true
         });
     }
+}
+
+/**
+ * Generate forum tags for feedback requests
+ * @param {Object} feedbackData - Feedback request data
+ * @returns {Array<string>} Array of forum tag names
+ */
+function generateFeedbackForumTags(feedbackData) {
+    const forumTags = ['Feedback Request']; // Always add this tag
+
+    // Analyze the goal and draft to determine what kind of feedback
+    const content = `${feedbackData.goal} ${feedbackData.draft} ${feedbackData.questions.join(' ')}`.toLowerCase();
+
+    // Category detection based on keywords
+    if (content.includes('design') || content.includes('ui') || content.includes('ux') || 
+        content.includes('interface') || content.includes('visual') || content.includes('color') ||
+        content.includes('layout') || content.includes('figma')) {
+        forumTags.push('Design Review');
+    }
+
+    if (content.includes('code') || content.includes('function') || content.includes('bug') ||
+        content.includes('error') || content.includes('syntax') || content.includes('algorithm') ||
+        content.includes('programming') || content.includes('development')) {
+        forumTags.push('Code Review');
+    }
+
+    if (content.includes('product') || content.includes('feature') || content.includes('user') ||
+        content.includes('market') || content.includes('strategy') || content.includes('business') ||
+        content.includes('idea') || content.includes('concept')) {
+        forumTags.push('Product Strategy');
+    }
+
+    if (content.includes('ui') || content.includes('ux') || content.includes('user experience') ||
+        content.includes('usability') || content.includes('mobile') || content.includes('app')) {
+        forumTags.push('UI/UX');
+    }
+
+    // If no specific category was detected, add General
+    if (forumTags.length === 1) {
+        forumTags.push('General');
+    }
+
+    return forumTags;
 }

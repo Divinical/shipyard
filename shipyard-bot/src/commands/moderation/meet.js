@@ -57,11 +57,17 @@ export default class MeetCommand extends BaseCommand {
     }
 
     async execute(interaction) {
+        const subcommand = interaction.options.getSubcommand();
+
+        // Allow all users to list meetings
+        if (subcommand === 'list') {
+            return await this.listMeets(interaction);
+        }
+
+        // All other subcommands require moderator permissions
         if (!this.isModerator(interaction.member)) {
             return this.sendError(interaction, 'Only moderators can manage meetings');
         }
-
-        const subcommand = interaction.options.getSubcommand();
 
         switch (subcommand) {
             case 'create':
@@ -72,9 +78,6 @@ export default class MeetCommand extends BaseCommand {
                 break;
             case 'attendance':
                 await this.takeAttendance(interaction);
-                break;
-            case 'list':
-                await this.listMeets(interaction);
                 break;
         }
     }

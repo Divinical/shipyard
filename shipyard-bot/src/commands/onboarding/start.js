@@ -28,7 +28,7 @@ export default class StartCommand extends BaseCommand {
 
         // Add input fields
         const nameInput = new TextInputBuilder()
-            .setCustomId('name')
+            .setCustomId('username')
             .setLabel('What should we call you?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
@@ -43,19 +43,19 @@ export default class StartCommand extends BaseCommand {
             .setPlaceholder('Europe/London, America/New_York, Asia/Tokyo, etc.');
 
         const oneLinerInput = new TextInputBuilder()
-            .setCustomId('oneliner')
-            .setLabel('About yourself (one sentence)')
+            .setCustomId('offer')
+            .setLabel('What you offer (one sentence)')
             .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setMaxLength(200)
-            .setPlaceholder('I am a student learning to code, I build mobile apps, etc.');
-
-        const projectInput = new TextInputBuilder()
-            .setCustomId('project')
-            .setLabel('Your projects (optional)')
-            .setStyle(TextInputStyle.Paragraph)
             .setRequired(false)
-            .setPlaceholder('https://myapp.com, https://github.com/myusername/myproject');
+            .setMaxLength(200)
+            .setPlaceholder('I can help with coding, design, mentoring, etc.');
+
+        const xProfileInput = new TextInputBuilder()
+            .setCustomId('x_profile')
+            .setLabel('Your X/Twitter profile (optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setPlaceholder('https://x.com/yourusername or @yourusername');
 
         const skillsInput = new TextInputBuilder()
             .setCustomId('skills')
@@ -69,7 +69,7 @@ export default class StartCommand extends BaseCommand {
             new ActionRowBuilder().addComponents(nameInput),
             new ActionRowBuilder().addComponents(timezoneInput),
             new ActionRowBuilder().addComponents(oneLinerInput),
-            new ActionRowBuilder().addComponents(projectInput),
+            new ActionRowBuilder().addComponents(xProfileInput),
             new ActionRowBuilder().addComponents(skillsInput)
         ];
 
