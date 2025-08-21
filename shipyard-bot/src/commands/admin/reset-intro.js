@@ -23,9 +23,9 @@ export default class ResetIntroCommand extends BaseCommand {
         const targetUser = interaction.options.getUser('user');
         
         try {
-            // Get user's current intro post ID
+            // Get user's current intro thread ID
             const userResult = await this.db.query(
-                'SELECT intro_post_id FROM users WHERE id = ?',
+                'SELECT thread_id, name FROM users WHERE id = ?',
                 [targetUser.id]
             );
 
@@ -33,28 +33,40 @@ export default class ResetIntroCommand extends BaseCommand {
                 return this.sendError(interaction, 'User not found in database');
             }
 
-            const introPostId = userResult.rows[0].intro_post_id;
+            const threadId = userResult.rows[0].thread_id;
+            const userName = userResult.rows[0].name;
 
-            if (!introPostId) {
+            if (!threadId) {
                 return this.sendError(interaction, 'User has no introduction to reset');
             }
 
-            // Delete the Discord message from intro channel
+            // Delete the forum thread from intro channel
             const introChannel = interaction.guild.channels.cache.get(process.env.INTRO_CHANNEL_ID);
             if (introChannel) {
                 try {
-                    const introMessage = await introChannel.messages.fetch(introPostId);
-                    await introMessage.delete();
-                    this.logger.info(`Deleted intro message ${introPostId} for user ${targetUser.id}`);
+                    const thread = await introChannel.threads.fetch(threadId);
+                    if (thread) {
+                        await thread.delete();
+                        this.logger.info(`Deleted intro thread ${threadId} for user ${targetUser.id}`);
+                    }
                 } catch (error) {
-                    this.logger.warn(`Could not delete intro message ${introPostId}:`, error);
-                    // Continue anyway - message might already be deleted
+                    this.logger.warn(`Could not delete intro thread ${threadId}:`, error);
+                    // Continue anyway - thread might already be deleted
                 }
             }
 
-            // Clear intro_post_id in database
+            // Clear introduction data in database
             await this.db.query(
-                'UPDATE users SET intro_post_id = NULL WHERE id = ?',
+                `UPDATE users SET 
+                 thread_id = NULL, name = NULL, location = NULL, age = NULL, 
+                 personal_line = NULL, x_handle = NULL, projects = NULL
+                 WHERE id = ?`,
+                [targetUser.id]
+            );
+
+            // Clean up any temporary intro data
+            await this.db.query(
+                'DELETE FROM temp_intros WHERE user_id = ?',
                 [targetUser.id]
             );
 

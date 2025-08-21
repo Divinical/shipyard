@@ -13,64 +13,67 @@ export default class StartCommand extends BaseCommand {
     async execute(interaction) {
         // Check if user already has intro
         const user = await this.db.query(
-            'SELECT intro_post_id FROM users WHERE id = ?',
+            'SELECT thread_id FROM users WHERE id = ?',
             [interaction.user.id]
         );
 
-        if (user.rows.length > 0 && user.rows[0].intro_post_id) {
-            return this.sendError(interaction, 'You have already completed onboarding!');
+        if (user.rows.length > 0 && user.rows[0].thread_id) {
+            return this.sendError(interaction, 'You have already completed your introduction!');
         }
 
-        // Create onboarding modal
+        // Create onboarding modal (part 1)
         const modal = new ModalBuilder()
             .setCustomId('onboarding_modal')
-            .setTitle('Welcome to ShipYard!');
+            .setTitle('Welcome to ShipYard! (Step 1/2)');
 
         // Add input fields
         const nameInput = new TextInputBuilder()
-            .setCustomId('username')
+            .setCustomId('name')
             .setLabel('What should we call you?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(100)
+            .setMaxLength(50)
             .setPlaceholder('Your name or nickname');
 
-        const timezoneInput = new TextInputBuilder()
-            .setCustomId('timezone')
-            .setLabel('What timezone are you in?')
+        const locationInput = new TextInputBuilder()
+            .setCustomId('location')
+            .setLabel('Where are you from?')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setPlaceholder('Europe/London, America/New_York, Asia/Tokyo, etc.');
+            .setMaxLength(100)
+            .setPlaceholder('Country / City (e.g., Spain / Barcelona)');
 
-        const oneLinerInput = new TextInputBuilder()
-            .setCustomId('offer')
-            .setLabel('What you offer (one sentence)')
+        const ageInput = new TextInputBuilder()
+            .setCustomId('age')
+            .setLabel('How old are you?')
             .setStyle(TextInputStyle.Short)
-            .setRequired(false)
-            .setMaxLength(200)
-            .setPlaceholder('I can help with coding, design, mentoring, etc.');
+            .setRequired(true)
+            .setMaxLength(3)
+            .setPlaceholder('25');
 
-        const xProfileInput = new TextInputBuilder()
-            .setCustomId('x_profile')
-            .setLabel('Your X/Twitter profile (optional)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false)
-            .setPlaceholder('https://x.com/yourusername or @yourusername');
-
-        const skillsInput = new TextInputBuilder()
-            .setCustomId('skills')
-            .setLabel('Your skills (separate with commas)')
+        const personalLineInput = new TextInputBuilder()
+            .setCustomId('personal_line')
+            .setLabel('Tell us about yourself (one sentence)')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
-            .setPlaceholder('Python, Web Design, React, Marketing, Writing, etc.');
+            .setMaxLength(200)
+            .setPlaceholder('I\'m passionate about building tech solutions for small businesses');
 
-        // Create action rows
+        const xHandleInput = new TextInputBuilder()
+            .setCustomId('x_handle')
+            .setLabel('Your X/Twitter handle')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(50)
+            .setPlaceholder('@yourusername or yourusername');
+
+        // Create first set of action rows (Discord modal limit is 5)
         const rows = [
             new ActionRowBuilder().addComponents(nameInput),
-            new ActionRowBuilder().addComponents(timezoneInput),
-            new ActionRowBuilder().addComponents(oneLinerInput),
-            new ActionRowBuilder().addComponents(xProfileInput),
-            new ActionRowBuilder().addComponents(skillsInput)
+            new ActionRowBuilder().addComponents(locationInput),
+            new ActionRowBuilder().addComponents(ageInput),
+            new ActionRowBuilder().addComponents(personalLineInput),
+            new ActionRowBuilder().addComponents(xHandleInput)
         ];
 
         modal.addComponents(...rows);

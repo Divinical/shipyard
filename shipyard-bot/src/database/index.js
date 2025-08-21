@@ -49,12 +49,16 @@
                   await SQLITE_MIGRATIONS.createReportsTable(this);
                   await SQLITE_MIGRATIONS.createConsentsTable(this);
                   await SQLITE_MIGRATIONS.createAnalyticsSnapshotsTable(this);
+                  await SQLITE_MIGRATIONS.createTempIntrosTable(this);
                   await SQLITE_MIGRATIONS.createGamificationTables(this);
                   await SQLITE_MIGRATIONS.createPoliciesTable(this);
               });
 
               // Apply forum channel database updates (schema migrations) - MUST run before indexes
               await SQLITE_MIGRATIONS.updateTablesForForumChannels(this);
+              
+              // Apply new introduction system updates
+              await SQLITE_MIGRATIONS.updateUsersTableForNewIntro(this);
 
               // Create indexes (separate transaction) - runs after thread_id columns are added
               await SQLITE_MIGRATIONS.createIndexes(this);

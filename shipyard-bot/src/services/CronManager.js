@@ -12,11 +12,11 @@ export class CronManager {
     }
 
     initializeJobs() {
-        // Daily Dock Check - 09:00
-        this.scheduleJob('dockCheck', '0 9 * * *', () => this.runDockCheck());
+        // DISABLED - Daily Dock Check - 09:00
+        // this.scheduleJob('dockCheck', '0 9 * * *', () => this.runDockCheck());
         
-        // Activity Monitor - 10:00 daily
-        this.scheduleJob('activityMonitor', '0 10 * * *', () => this.runActivityMonitor());
+        // DISABLED - Activity Monitor - 10:00 daily
+        // this.scheduleJob('activityMonitor', '0 10 * * *', () => this.runActivityMonitor());
         
         // Weekly Analytics Digest - Sunday 18:00
         this.scheduleJob('weeklyDigest', '0 18 * * 0', () => this.runWeeklyDigest());
@@ -24,14 +24,17 @@ export class CronManager {
         // Showcase Thread - Friday 12:00
         this.scheduleJob('showcaseThread', '0 12 * * 5', () => this.createShowcaseThread());
         
-        // Thread Starters - Tuesday/Thursday 10:00, Sunday 19:00
-        this.scheduleJob('threadStarterTue', '0 10 * * 2', () => this.postThreadStarter());
-        this.scheduleJob('threadStarterThu', '0 10 * * 4', () => this.postThreadStarter());
-        this.scheduleJob('threadStarterSun', '0 19 * * 0', () => this.postThreadStarter());
+        // DISABLED - Thread Starters - Tuesday/Thursday 10:00, Sunday 19:00
+        // this.scheduleJob('threadStarterTue', '0 10 * * 2', () => this.postThreadStarter());
+        // this.scheduleJob('threadStarterThu', '0 10 * * 4', () => this.postThreadStarter());
+        // this.scheduleJob('threadStarterSun', '0 19 * * 0', () => this.postThreadStarter());
         
-        // Gamification Jobs
-        this.scheduleJob('weeklyGoalCompute', '30 17 * * 0', () => this.computeWeeklyGoals());
-        this.scheduleJob('quietNudge', '0 11 * * *', () => this.sendQuietNudges());
+        // DISABLED - Gamification Jobs
+        // this.scheduleJob('weeklyGoalCompute', '30 17 * * 0', () => this.computeWeeklyGoals());
+        // this.scheduleJob('quietNudge', '0 11 * * *', () => this.sendQuietNudges());
+        
+        // Weekly Goals Reminder - Saturday 17:00 (5 PM UK time)
+        this.scheduleJob('weeklyGoalsReminder', '0 17 * * 6', () => this.sendWeeklyGoalsReminder());
         
         // Away status cleanup - daily at 00:00
         this.scheduleJob('awayCleanup', '0 0 * * *', () => this.cleanupAwayStatuses());
@@ -391,6 +394,34 @@ export class CronManager {
             .setTitle('💭 Discussion Starter')
             .setDescription(prompt)
             .setFooter({ text: 'Share your thoughts below!' })
+            .setTimestamp();
+
+        await channel.send({ embeds: [embed] });
+    }
+
+    async sendWeeklyGoalsReminder() {
+        const channel = this.bot.client.channels.cache.get(process.env.WEEKLY_GOALS_CHANNEL_ID);
+        if (!channel) return;
+
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF7F)
+            .setTitle('🎯 Weekly Goals Reminder')
+            .setDescription('Time to set your goals for the upcoming week!')
+            .addFields(
+                { 
+                    name: '📝 How to set your goals', 
+                    value: 'Use `/goals set` to share your weekly objectives with the community!' 
+                },
+                { 
+                    name: '💡 Goal-setting tips', 
+                    value: '• Make them specific and measurable\n• Split between professional and personal\n• Keep it realistic (max 7 goals total)\n• Share them for accountability!' 
+                },
+                {
+                    name: '✨ Examples',
+                    value: '**Professional:** Ship feature X, Write 3 blog posts, Learn React hooks\n**Personal:** Exercise 4x, Read 100 pages, Call family 2x'
+                }
+            )
+            .setFooter({ text: 'Let\'s make this week count! 🚀' })
             .setTimestamp();
 
         await channel.send({ embeds: [embed] });

@@ -284,6 +284,44 @@ export const SQLITE_MIGRATIONS = {
         `);
     },
 
+    async createTempIntrosTable(db) {
+        return db.querySync(`
+            CREATE TABLE IF NOT EXISTS temp_intros (
+                user_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                location TEXT NOT NULL,
+                age TEXT NOT NULL,
+                personal_line TEXT NOT NULL,
+                x_handle TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+    },
+
+    async updateUsersTableForNewIntro(db) {
+        // Add new columns for introduction data
+        const alterStatements = [
+            'ALTER TABLE users ADD COLUMN name TEXT', // User's preferred name from intro
+            'ALTER TABLE users ADD COLUMN location TEXT',
+            'ALTER TABLE users ADD COLUMN age TEXT', 
+            'ALTER TABLE users ADD COLUMN personal_line TEXT',
+            'ALTER TABLE users ADD COLUMN x_handle TEXT',
+            'ALTER TABLE users ADD COLUMN projects TEXT', // JSON string
+            'ALTER TABLE users ADD COLUMN thread_id TEXT' // Forum thread ID
+        ];
+
+        for (const statement of alterStatements) {
+            try {
+                await db.querySync(statement);
+            } catch (error) {
+                // Ignore column already exists errors
+                if (!error.message.includes('duplicate column')) {
+                    throw error;
+                }
+            }
+        }
+    },
+
     async createIndexes(db) {
         const indexes = [
             // Users indexes - Enhanced for common queries

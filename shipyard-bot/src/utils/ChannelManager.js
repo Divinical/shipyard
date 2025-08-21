@@ -13,7 +13,9 @@ export class ChannelManager {
             BUILD_LOG: 'BUILD_LOG_CHANNEL_ID',
             SHOWCASE: 'SHOWCASE_CHANNEL_ID',
             DOCK_CHECK: 'DOCK_CHECK_CHANNEL_ID',
-            JOBS_COLLABS: 'JOBS_COLLABS_CHANNEL_ID'
+            JOBS_COLLABS: 'JOBS_COLLABS_CHANNEL_ID',
+            WEEKLY_GOALS: 'WEEKLY_GOALS_CHANNEL_ID',
+            WELCOME: 'WELCOME_CHANNEL_ID'
         };
     }
 
