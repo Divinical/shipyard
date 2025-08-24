@@ -167,35 +167,82 @@ export class ModerationService {
 
     async handleSpam(message, reason) {
         try {
-            await message.delete();
-            
-            // Warn user
-            const warning = await message.channel.send(
-                `⚠️ ${message.author}, your message was removed: ${reason}`
+            // Store message for pending moderation instead of auto-delete
+            await this.db.query(
+                `INSERT INTO pending_moderations (message_id, user_id, channel_id, content, reason, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [message.id, message.author.id, message.channel.id, message.content, reason, new Date()]
             );
             
-            setTimeout(() => warning.delete().catch(() => {}), 5000);
-            
-            // Log to mod room
-            await this.logModAction('Spam Detected', {
-                user: message.author.tag,
-                channel: message.channel.name,
-                reason: reason,
-                content: message.content.substring(0, 500)
+            // Notify user their message is under review (ephemeral-style reply)
+            const notification = await message.reply({
+                content: `⏳ Your message has been flagged for review: **${reason}**\nA moderator will review it shortly. Please be patient.`,
+                allowedMentions: { repliedUser: false }
             });
             
-            // Track warnings
-            await this.trackWarning(message.author.id, 'spam', reason);
+            // Delete notification after 30 seconds
+            setTimeout(() => notification.delete().catch(() => {}), 30000);
+            
+            // Send to mod room with action buttons
+            await this.sendSpamModerationEmbed(message, reason);
             
         } catch (error) {
             this.logger.error('Error handling spam:', error);
+            // Fallback to old behavior if database fails
+            await message.delete();
+            const warning = await message.channel.send(
+                `⚠️ ${message.author}, your message was removed: ${reason}`
+            );
+            setTimeout(() => warning.delete().catch(() => {}), 5000);
         }
+    }
+
+    async sendSpamModerationEmbed(message, reason) {
+        const modChannel = this.bot.client.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
+        if (!modChannel) return;
+        
+        const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFF4444)
+            .setTitle('🚨 Message Flagged for Review')
+            .setDescription(`**Reason:** ${reason}`)
+            .addFields(
+                { name: 'User', value: `${message.author} (${message.author.tag})`, inline: true },
+                { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                { name: 'Message ID', value: message.id, inline: true },
+                { name: 'Content', value: message.content.length > 1024 ? message.content.substring(0, 1021) + '...' : message.content }
+            )
+            .setTimestamp()
+            .setFooter({ text: `User ID: ${message.author.id}` });
+        
+        const allowButton = new ButtonBuilder()
+            .setCustomId(`spam_allow_${message.id}`)
+            .setLabel('Allow Message')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅');
+            
+        const deleteButton = new ButtonBuilder()
+            .setCustomId(`spam_delete_${message.id}`)
+            .setLabel('Delete Message')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('🗑️');
+            
+        const row = new ActionRowBuilder().addComponents(allowButton, deleteButton);
+        
+        const modMessage = await modChannel.send({ embeds: [embed], components: [row] });
+        
+        // Store mod message ID for later updates
+        await this.db.query(
+            'UPDATE pending_moderations SET mod_message_id = ? WHERE message_id = ?',
+            [modMessage.id, message.id]
+        );
     }
 
     async trackWarning(userId, type, reason) {
         // Store warning in database
         await this.db.query(
-            `INSERT INTO reports (reporter_id, target_id, reason, created_at)
+            `INSERT INTO reports (reporter_id, reported_user_id, reason, created_at)
              VALUES ('SYSTEM', ?, ?, ?)`,
             [userId, `Auto-warning: ${type} - ${reason}`, new Date()]
         );
@@ -203,7 +250,7 @@ export class ModerationService {
         // Check warning count
         const warningCount = await this.db.query(
             `SELECT COUNT(*) as count FROM reports 
-             WHERE target_id = ? AND reporter_id = 'SYSTEM'
+             WHERE reported_user_id = ? AND reporter_id = 'SYSTEM'
              AND created_at > datetime('now', '-7 days')`,
             [userId]
         );
@@ -219,7 +266,7 @@ export class ModerationService {
     async createReport(reporterId, targetId, reason, evidence = null) {
         // Create report in database
         const result = await this.db.query(
-            `INSERT INTO reports (reporter_id, target_id, reason, created_at)
+            `INSERT INTO reports (reporter_id, reported_user_id, reason, created_at)
              VALUES (?, ?, ?, ?)`,
             [reporterId, targetId, reason, new Date()]
         );
@@ -343,7 +390,7 @@ export class ModerationService {
         
         // Get previous reports
         const previousReports = await this.db.query(
-            'SELECT * FROM reports WHERE target_id = ? AND id != ? ORDER BY created_at DESC LIMIT 5',
+            'SELECT * FROM reports WHERE reported_user_id = ? AND id != ? ORDER BY created_at DESC LIMIT 5',
             [targetId, thread.name.match(/\d+/)[0]]
         );
         

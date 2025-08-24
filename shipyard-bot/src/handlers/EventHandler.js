@@ -134,8 +134,12 @@ export class EventHandler {
                 [new Date(), message.author.id]
             );
 
-            // Log message for tracking
+            // Log message for tracking - ensure user exists first
             const messageType = this.getMessageType(message.channel.id);
+            await this.bot.db.query(
+                `INSERT OR IGNORE INTO users (id, username, joined_at) VALUES (?, ?, ?)`,
+                [message.author.id, message.author.username, new Date()]
+            );
             await this.bot.db.query(
                 `INSERT INTO messages (user_id, channel_id, message_id, type, created_at)
                  VALUES (?, ?, ?, ?, ?)`,

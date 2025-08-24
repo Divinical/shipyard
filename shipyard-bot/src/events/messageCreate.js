@@ -19,8 +19,12 @@ export default {
                 if (isSpam) return;
             }
             
-            // Log message for tracking
+            // Log message for tracking - ensure user exists first
             const messageType = getMessageType(message.channel.id);
+            await bot.db.query(
+                `INSERT OR IGNORE INTO users (id, username, joined_at) VALUES (?, ?, ?)`,
+                [message.author.id, message.author.username, new Date()]
+            );
             await bot.db.query(
                 `INSERT INTO messages (user_id, channel_id, message_id, type, created_at)
                  VALUES (?, ?, ?, ?, ?)`,

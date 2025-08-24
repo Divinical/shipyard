@@ -19,7 +19,7 @@ export class CronManager {
         // this.scheduleJob('activityMonitor', '0 10 * * *', () => this.runActivityMonitor());
         
         // Weekly Analytics Digest - Sunday 18:00
-        this.scheduleJob('weeklyDigest', '0 18 * * 0', () => this.runWeeklyDigest());
+        this.scheduleJob('weeklyDigest', '0 18 * * 5', () => this.runWeeklyDigest());
         
         // Showcase Thread - Friday 12:00
         this.scheduleJob('showcaseThread', '0 12 * * 5', () => this.createShowcaseThread());
@@ -33,8 +33,8 @@ export class CronManager {
         // this.scheduleJob('weeklyGoalCompute', '30 17 * * 0', () => this.computeWeeklyGoals());
         // this.scheduleJob('quietNudge', '0 11 * * *', () => this.sendQuietNudges());
         
-        // Weekly Goals Reminder - Saturday 17:00 (5 PM UK time)
-        this.scheduleJob('weeklyGoalsReminder', '0 17 * * 6', () => this.sendWeeklyGoalsReminder());
+        // Weekly Goals Reminder - Sunday 17:00 (5 PM UK time)
+        this.scheduleJob('weeklyGoalsReminder', '0 17 * * 0', () => this.sendWeeklyGoalsReminder());
         
         // Away status cleanup - daily at 00:00
         this.scheduleJob('awayCleanup', '0 0 * * *', () => this.cleanupAwayStatuses());
@@ -150,7 +150,7 @@ export class CronManager {
     }
 
     async runWeeklyDigest() {
-        const channel = this.bot.client.channels.cache.get(process.env.ANNOUNCEMENTS_CHANNEL_ID);
+        const channel = this.bot.client.channels.cache.get(process.env.MOD_ROOM_CHANNEL_ID);
         if (!channel) return;
 
         const weekStart = moment().tz(this.timezone).startOf('week');
@@ -359,7 +359,7 @@ export class CronManager {
         const awayRole = guild.roles.cache.find(r => r.name === 'Away');
         
         if (awayRole) {
-            for (const user of (clearedUsers || [])) {
+            for (const user of (clearedUsers.rows || [])) {
                 try {
                     const member = await guild.members.fetch(user.id);
                     await member.roles.remove(awayRole);
@@ -400,7 +400,7 @@ export class CronManager {
     }
 
     async sendWeeklyGoalsReminder() {
-        const channel = this.bot.client.channels.cache.get(process.env.WEEKLY_GOALS_CHANNEL_ID);
+        const channel = this.bot.client.channels.cache.get(process.env.ANNOUNCEMENTS_CHANNEL_ID);
         if (!channel) return;
 
         const embed = new EmbedBuilder()

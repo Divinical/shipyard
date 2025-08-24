@@ -1,6 +1,7 @@
 // src/handlers/InteractionHandler.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { ChannelManager } from '../utils/ChannelManager.js';
+import { PermissionUtils } from '../utils/PermissionUtils.js';
 
 export class InteractionHandler {
     constructor(bot) {
@@ -119,11 +120,11 @@ export class InteractionHandler {
         }
 
         const isAuthor = request.rows[0].author_id === interaction.user.id;
-        const isMod = this.isModerator(interaction.member);
+        const isMod = PermissionUtils.isModerator(interaction.member);
 
         if (!isAuthor && !isMod) {
             return interaction.reply({
-                content: 'Only the request author or moderators can mark this as solved.',
+                content: 'Only the request author, moderators, or founders can mark this as solved.',
                 ephemeral: true
             });
         }
@@ -142,15 +143,27 @@ export class InteractionHandler {
             );
         }
 
-        // Update the message
-        const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-            .setColor(0x00FF00)
-            .spliceFields(-1, 1, { name: 'Status', value: '✅ Solved', inline: true });
+        // Update the message embed and remove the button
+        const currentEmbed = interaction.message.embeds[0];
+        const updatedEmbed = EmbedBuilder.from(currentEmbed)
+            .setColor(0x00FF00); // Green color for solved
+        
+        // Find and update the Status field
+        const statusFieldIndex = currentEmbed.fields.findIndex(field => field.name === 'Status');
+        if (statusFieldIndex !== -1) {
+            updatedEmbed.spliceFields(statusFieldIndex, 1, { name: 'Status', value: '✅ Solved', inline: true });
+        } else {
+            updatedEmbed.addFields({ name: 'Status', value: '✅ Solved', inline: true });
+        }
+        
+        // Add solved by field
+        updatedEmbed.addFields({ name: 'Solved by', value: `<@${interaction.user.id}>`, inline: true });
 
-        await interaction.message.edit({ embeds: [updatedEmbed] });
+        // Remove the button by setting components to empty array
+        await interaction.message.edit({ embeds: [updatedEmbed], components: [] });
         
         await interaction.reply({
-            content: 'Help request marked as solved!',
+            content: '✅ Help request marked as solved!',
             ephemeral: true
         });
     }
@@ -180,6 +193,7 @@ export class InteractionHandler {
             ephemeral: true
         });
     }
+
 
     async handleConsent(interaction, params) {
         const [response, sessionId] = params;
@@ -399,26 +413,18 @@ export class InteractionHandler {
                 { name: '🎯 Goal', value: data.goal },
                 { name: '📝 Current Draft', value: data.draft.substring(0, 1024) },
                 { name: '❓ Questions', value: data.questions.join('\n').substring(0, 1024) },
-                { name: '🙏 What would help', value: data.ask }
+                { name: '🙏 What would help', value: data.ask },
+                { name: 'Status', value: '🔴 Open for Feedback', inline: true }
             )
             .setFooter({ text: `Clinic ID: ${clinicId}` })
             .setTimestamp();
 
-        // Add helpful button
-        const helpfulButton = new ButtonBuilder()
-            .setCustomId(`helpful_${clinicId}`)
-            .setLabel('Mark as Helpful')
-            .setStyle(ButtonStyle.Success)
-            .setEmoji('✅');
-
-        const row = new ActionRowBuilder().addComponents(helpfulButton);
-
-        // Post to forum channel using ChannelManager
+        // Post to forum channel using ChannelManager (no button needed - feedback requests should remain open)
         const { thread, message, channel: clinicChannel, usedFallback, error } = await this.channelManager.postToForumChannel(
             'CLINIC',
             interaction,
             postTitle,
-            { embeds: [embed], components: [row] },
+            { embeds: [embed] },
             forumTags
         );
 
@@ -532,13 +538,11 @@ export class InteractionHandler {
     }
 
     isModerator(member) {
-        return member.roles.cache.some(role => 
-            role.name === 'Mod' || role.name === 'Founder'
-        );
+        return PermissionUtils.isModerator(member);
     }
 
     isFounder(member) {
-        return member.roles.cache.some(role => role.name === 'Founder');
+        return PermissionUtils.isFounder(member);
     }
 
     // Select Menu Handlers

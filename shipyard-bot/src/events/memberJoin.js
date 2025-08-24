@@ -19,7 +19,7 @@ export default {
                 await bot.services.moderation.applyQuarantine(member);
             }
             
-            // Process onboarding
+            // Process onboarding - ensure user record is created before any message logging
             if (bot.services?.onboarding) {
                 await bot.services.onboarding.processNewMember(member);
             } else {
@@ -30,6 +30,9 @@ export default {
                     [member.id, member.user.username, new Date()]
                 );
             }
+            
+            // Small delay to ensure database write completes before any message logging
+            await new Promise(resolve => setTimeout(resolve, 100));
             
             // Send welcome message to Welcome channel with intro button
             await sendWelcomeToChannel(member, bot);

@@ -170,13 +170,16 @@ export const SQLITE_MIGRATIONS = {
             CREATE TABLE IF NOT EXISTS clinics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 author_id TEXT NOT NULL REFERENCES users(id),
-                message_id TEXT UNIQUE NOT NULL,
+                message_id TEXT,
+                thread_id TEXT,
                 goal TEXT,
                 draft TEXT,
                 questions TEXT,
                 ask TEXT,
-                status TEXT DEFAULT 'open' CHECK (status IN ('open', 'solved')),
+                status TEXT DEFAULT 'open' CHECK (status IN ('open', 'completed', 'solved')),
                 helpful_count INTEGER DEFAULT 0,
+                completed_at DATETIME,
+                completed_by TEXT REFERENCES users(id),
                 solved_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -293,6 +296,20 @@ export const SQLITE_MIGRATIONS = {
                 age TEXT NOT NULL,
                 personal_line TEXT NOT NULL,
                 x_handle TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+    },
+
+    async createPendingModerationsTable(db) {
+        return db.querySync(`
+            CREATE TABLE IF NOT EXISTS pending_moderations (
+                message_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id),
+                channel_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                mod_message_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
