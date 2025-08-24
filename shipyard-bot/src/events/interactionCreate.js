@@ -1,6 +1,7 @@
 // src/events/interactionCreate.js
-import { Events, MessageFlags } from 'discord.js';
+import { Events, MessageFlags, EmbedBuilder } from 'discord.js';
 import { ChannelManager } from '../utils/ChannelManager.js';
+import { PermissionUtils } from '../utils/PermissionUtils.js';
 
 export default {
     name: Events.InteractionCreate,
@@ -23,7 +24,7 @@ export default {
                     
                     const errorMessage = {
                         content: 'There was an error executing this command!',
-                        ephemeral: true
+                        flags: MessageFlags.Ephemeral
                     };
                     
                     if (interaction.replied || interaction.deferred) {
@@ -84,7 +85,7 @@ async function handleButtonInteraction(interaction, bot) {
         case 'unlock':
             if (params[0] === 'server' && bot.services?.moderation) {
                 await bot.services.moderation.unlockServer(interaction.guild);
-                await interaction.reply({ content: 'Server unlocked', ephemeral: true });
+                await interaction.reply({ content: 'Server unlocked', flags: MessageFlags.Ephemeral });
             }
             break;
         case 'continue':
@@ -97,6 +98,13 @@ async function handleButtonInteraction(interaction, bot) {
                 await startIntroductionModal(interaction, bot, params[1]); // params[1] is userId
             }
             break;
+        case 'spam':
+            if (params[0] === 'allow') {
+                await handleSpamAllow(interaction, bot, params[1]); // params[1] is messageId
+            } else if (params[0] === 'delete') {
+                await handleSpamDelete(interaction, bot, params[1]); // params[1] is messageId
+            }
+            break;
     }
 }
 
@@ -105,7 +113,7 @@ async function startIntroductionModal(interaction, bot, userId) {
     if (interaction.user.id !== userId) {
         return interaction.reply({
             content: '❌ This introduction button was created for someone else.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -118,7 +126,7 @@ async function startIntroductionModal(interaction, bot, userId) {
     if (user.rows.length > 0 && user.rows[0].thread_id) {
         return interaction.reply({
             content: '✅ You have already completed your introduction! You should now have access to all channels.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -187,7 +195,7 @@ async function showSkillsModal(interaction, bot, userId) {
     if (interaction.user.id !== userId) {
         return interaction.reply({
             content: '❌ This introduction process was started by someone else.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -272,13 +280,20 @@ async function markAsSolved(bot, interaction, requestId) {
         [requestId]
     );
     
-    const isAuthor = result.rows[0]?.author_id === interaction.user.id;
-    const isMod = interaction.member.roles.cache.some(r => r.name === 'Mod' || r.name === 'Founder');
+    if (result.rows.length === 0) {
+        return interaction.reply({
+            content: 'Help request not found.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    
+    const isAuthor = result.rows[0].author_id === interaction.user.id;
+    const isMod = PermissionUtils.isModerator(interaction.member);
     
     if (!isAuthor && !isMod) {
         return interaction.reply({
-            content: 'Only the request author or moderators can mark this as solved.',
-            ephemeral: true
+            content: 'Only the request author, moderators, or founders can mark this as solved.',
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -291,9 +306,28 @@ async function markAsSolved(bot, interaction, requestId) {
         await bot.services.gamification.logAction(interaction.user.id, 'help_solved', interaction.message.id);
     }
     
+    // Update the message embed and remove the button
+    const currentEmbed = interaction.message.embeds[0];
+    const updatedEmbed = EmbedBuilder.from(currentEmbed)
+        .setColor(0x00FF00); // Green color for solved
+    
+    // Find and update the Status field
+    const statusFieldIndex = currentEmbed.fields.findIndex(field => field.name === 'Status');
+    if (statusFieldIndex !== -1) {
+        updatedEmbed.spliceFields(statusFieldIndex, 1, { name: 'Status', value: '✅ Solved', inline: true });
+    } else {
+        updatedEmbed.addFields({ name: 'Status', value: '✅ Solved', inline: true });
+    }
+    
+    // Add solved by field
+    updatedEmbed.addFields({ name: 'Solved by', value: `<@${interaction.user.id}>`, inline: true });
+
+    // Remove the button by setting components to empty array
+    await interaction.message.edit({ embeds: [updatedEmbed], components: [] });
+    
     await interaction.reply({
-        content: 'Help request marked as solved!',
-        ephemeral: true
+        content: '✅ Help request marked as solved!',
+        flags: MessageFlags.Ephemeral
     });
 }
 
@@ -309,9 +343,10 @@ async function markAsHelpful(bot, interaction, clinicId) {
     
     await interaction.reply({
         content: 'Thanks for marking this feedback as helpful!',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
     });
 }
+
 
 async function markAsResolved(bot, interaction, clinicId) {
     const result = await bot.db.query(
@@ -356,7 +391,7 @@ async function confirmDataDeletion(bot, interaction, userId) {
     if (interaction.user.id !== userId) {
         return interaction.reply({
             content: 'You can only delete your own data.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -409,6 +444,18 @@ async function processOnboardingPart1(interaction, bot, channelManager) {
         [interaction.user.id, name, location, age, personalLine, xHandle, new Date()]
     );
 
+    // Check for significant name differences and warn user
+    const discordUsername = interaction.user.username;
+    const normalizedIntroName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normalizedDiscordName = discordUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
+    
+    let nameWarning = '';
+    if (normalizedIntroName !== normalizedDiscordName && 
+        !normalizedIntroName.includes(normalizedDiscordName) && 
+        !normalizedDiscordName.includes(normalizedIntroName)) {
+        nameWarning = `\n\n⚠️ **Name Notice**: Your Discord username is "${discordUsername}" but you want to be called "${name}". Your Discord nickname will be updated to "${name}" to avoid confusion in the community.`;
+    }
+
     // Create continue button for second part
     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
     const continueButton = new ButtonBuilder()
@@ -420,7 +467,7 @@ async function processOnboardingPart1(interaction, bot, channelManager) {
     const row = new ActionRowBuilder().addComponents(continueButton);
 
     await interaction.reply({
-        content: `✅ **Step 1 Complete!**\n\nThanks ${name}! Now let's add your skills and projects.\n\n*Click the button below to continue:*`,
+        content: `✅ **Step 1 Complete!**\n\nThanks ${name}! Now let's add your skills and projects.${nameWarning}\n\n*Click the button below to continue:*`,
         components: [row],
         ephemeral: true
     });
@@ -436,7 +483,7 @@ async function processOnboardingPart2(interaction, bot, channelManager) {
     if (tempData.rows.length === 0) {
         return interaction.reply({
             content: '❌ Session expired. Please run `/introduce` again.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -458,7 +505,8 @@ async function processOnboardingPart2(interaction, bot, channelManager) {
         personalLine: firstPart.personal_line,
         xUrl,
         skills: [skill1, skill2, skill3],
-        projects: [project1, project2].filter(p => p)
+        projects: [project1, project2].filter(p => p),
+        discordUsername: interaction.user.username
     });
 
     // Post to forum channel
@@ -476,7 +524,7 @@ async function processOnboardingPart2(interaction, bot, channelManager) {
     if (!message) {
         return interaction.reply({
             content: `Unable to post introduction: ${error}`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -500,10 +548,19 @@ async function processOnboardingPart2(interaction, bot, channelManager) {
     // Clean up temporary data
     await bot.db.query('DELETE FROM temp_intros WHERE user_id = ?', [interaction.user.id]);
 
-    // Add Member role
+    // Add Member role (only after successful introduction completion)
     const memberRole = interaction.guild.roles.cache.find(r => r.name === 'Member');
-    if (memberRole) {
+    if (memberRole && thread?.id) {
+        // Verify introduction is complete by checking thread_id exists
         await interaction.member.roles.add(memberRole);
+        bot.logger.info(`Member role granted to ${interaction.user.tag} after completing introduction`);
+        
+        // Set nickname to match introduction name
+        if (bot.services?.onboarding) {
+            await bot.services.onboarding.setMemberNickname(interaction.member, firstPart.name, interaction.user.username);
+        }
+    } else {
+        bot.logger.warn(`Failed to grant member role to ${interaction.user.tag} - missing thread_id or member role`);
     }
 
     // Reply to user
@@ -531,7 +588,7 @@ async function processClinicRequest(interaction, bot, channelManager) {
     const tempClinicId = `temp_${Date.now()}`;
     
     // Create embed
-    const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
+    const { EmbedBuilder } = await import('discord.js');
     const embed = new EmbedBuilder()
         .setColor(0x00FFFF)
         .setTitle('💡 Feedback Request')
@@ -543,32 +600,25 @@ async function processClinicRequest(interaction, bot, channelManager) {
             { name: '🎯 Goal', value: goal },
             { name: '📝 Current Draft', value: draft.substring(0, 1024) },
             { name: '❓ Questions', value: questions.join('\n').substring(0, 1024) },
-            { name: '🙏 What would help', value: ask }
+            { name: '🙏 What would help', value: ask },
+            { name: 'Status', value: '🔴 Open for Feedback', inline: true }
         )
         .setFooter({ text: `Clinic ID: ${tempClinicId}` })
         .setTimestamp();
     
-    const helpfulButton = new ButtonBuilder()
-        .setCustomId(`helpful_${tempClinicId}`)
-        .setLabel('Mark as Helpful')
-        .setStyle(ButtonStyle.Success)
-        .setEmoji('✅');
-    
-    const row = new ActionRowBuilder().addComponents(helpfulButton);
-    
-    // Post to forum channel using ChannelManager
+    // Post to forum channel using ChannelManager (no button - feedback requests should remain open)
     const { thread, message, channel: clinicChannel, usedFallback, error } = await channelManager.postToForumChannel(
         'CLINIC',
         interaction,
         postTitle,
-        { embeds: [embed], components: [row] },
+        { embeds: [embed] },
         forumTags
     );
 
     if (!message) {
         return interaction.reply({
             content: `Unable to post feedback request: ${error}`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -581,7 +631,7 @@ async function processClinicRequest(interaction, bot, channelManager) {
     
     const clinicId = result.lastID;
     
-    // Update the embed and button with real clinic ID
+    // Update the embed with real clinic ID (no button needed)
     const updatedEmbed = new EmbedBuilder()
         .setColor(0x00FFFF)
         .setTitle('💡 Feedback Request')
@@ -593,23 +643,15 @@ async function processClinicRequest(interaction, bot, channelManager) {
             { name: '🎯 Goal', value: goal },
             { name: '📝 Current Draft', value: draft.substring(0, 1024) },
             { name: '❓ Questions', value: questions.join('\n').substring(0, 1024) },
-            { name: '🙏 What would help', value: ask }
+            { name: '🙏 What would help', value: ask },
+            { name: 'Status', value: '🔴 Open for Feedback', inline: true }
         )
         .setFooter({ text: `Clinic ID: ${clinicId}` })
         .setTimestamp();
-
-    const updatedHelpfulButton = new ButtonBuilder()
-        .setCustomId(`helpful_${clinicId}`)
-        .setLabel('Mark as Helpful')
-        .setStyle(ButtonStyle.Success)
-        .setEmoji('✅');
-
-    const updatedRow = new ActionRowBuilder().addComponents(updatedHelpfulButton);
     
-    // Update the message with correct clinic ID
+    // Update the message with correct clinic ID (no components = no button)
     await message.edit({
-        embeds: [updatedEmbed],
-        components: [updatedRow]
+        embeds: [updatedEmbed]
     });
     
     const successMessage = usedFallback 
@@ -635,7 +677,7 @@ async function processReportDetails(interaction, bot) {
     if (pendingData.rows.length === 0) {
         return interaction.reply({
             content: 'Report data not found. Please try again.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -651,7 +693,7 @@ async function processReportDetails(interaction, bot) {
         
         await interaction.reply({
             content: `Report #${reportId} has been filed. Moderators will review it soon.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     } else {
         // Fallback
@@ -664,7 +706,7 @@ async function processReportDetails(interaction, bot) {
         const result = await bot.db.query('SELECT last_insert_rowid() as id');
         await interaction.reply({
             content: `Report #${result.rows[0].id} has been filed.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -689,15 +731,29 @@ async function processGoalsSubmission(interaction, bot, channelManager) {
     if (totalGoals === 0) {
         return interaction.reply({
             content: '❌ Please add at least one goal before submitting!',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
     if (totalGoals > 7) {
         return interaction.reply({
             content: `❌ Too many goals! You have ${totalGoals} goals but the maximum is 7. Please reduce your goals and try again.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
+    }
+    
+    // Get user's preferred name from database (from their introduction)
+    let displayName = interaction.user.username; // fallback to Discord username
+    try {
+        const userResult = await bot.db.query(
+            'SELECT username FROM users WHERE id = ?',
+            [interaction.user.id]
+        );
+        if (userResult.rows && userResult.rows.length > 0 && userResult.rows[0].username) {
+            displayName = userResult.rows[0].username;
+        }
+    } catch (error) {
+        bot.logger.warn(`Could not fetch user's intro name for ${interaction.user.id}, using Discord username`);
     }
     
     // Get current week information
@@ -709,7 +765,7 @@ async function processGoalsSubmission(interaction, bot, channelManager) {
     
     // Create goals message
     const goalsMessage = generateGoalsMessage({
-        username: interaction.user.username,
+        username: displayName,
         professionalGoals: profGoals,
         personalGoals: persGoals,
         totalCount: totalGoals,
@@ -719,7 +775,7 @@ async function processGoalsSubmission(interaction, bot, channelManager) {
     });
     
     // Post to forum channel
-    const postTitle = `🎯 [Week ${weekNumber}] ${interaction.user.username}'s Weekly Goals`;
+    const postTitle = `🎯 [Week ${weekNumber}] ${displayName}'s Weekly Goals`;
     const forumTags = ['Weekly Goals', `Week ${weekNumber}`, `${year}`];
     
     const { thread, message, channel: goalsChannel, usedFallback, error } = await channelManager.postToForumChannel(
@@ -733,7 +789,7 @@ async function processGoalsSubmission(interaction, bot, channelManager) {
     if (!message) {
         return interaction.reply({
             content: `Unable to post weekly goals: ${error}`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     
@@ -746,6 +802,161 @@ async function processGoalsSubmission(interaction, bot, channelManager) {
         content: successMessage,
         ephemeral: true
     });
+}
+
+async function handleSpamAllow(interaction, bot, messageId) {
+    try {
+        // Check if user is moderator
+        if (!bot.services?.moderation?.isModerator(interaction.member)) {
+            return interaction.reply({
+                content: '❌ Only moderators can use this action.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Get pending moderation record
+        const pending = await bot.db.query(
+            'SELECT * FROM pending_moderations WHERE message_id = ?',
+            [messageId]
+        );
+
+        if (pending.rows.length === 0) {
+            return interaction.reply({
+                content: '❌ Moderation record not found or already processed.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const record = pending.rows[0];
+        
+        // Get the original message
+        const channel = await bot.client.channels.fetch(record.channel_id);
+        let message;
+        try {
+            message = await channel.messages.fetch(messageId);
+        } catch (error) {
+            // Message was deleted, remove from pending
+            await bot.db.query('DELETE FROM pending_moderations WHERE message_id = ?', [messageId]);
+            return interaction.reply({
+                content: '❌ Original message not found (may have been deleted).',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Remove from pending moderations
+        await bot.db.query('DELETE FROM pending_moderations WHERE message_id = ?', [messageId]);
+
+        // Update the embed to show approved status
+        const approvedEmbed = interaction.message.embeds[0];
+        const { EmbedBuilder } = await import('discord.js');
+        const updatedEmbed = new EmbedBuilder()
+            .setColor(0x00FF00) // Green
+            .setTitle('✅ Message Approved')
+            .setDescription(`**Reason:** ${record.reason}\n**Action:** Approved by ${interaction.user}`)
+            .addFields(approvedEmbed.fields);
+
+        await interaction.update({ embeds: [updatedEmbed], components: [] });
+
+        // Notify the user their message was approved
+        try {
+            const user = await bot.client.users.fetch(record.user_id);
+            await user.send(`✅ Your message in <#${record.channel_id}> has been approved by a moderator.`);
+        } catch (error) {
+            // User may have DMs disabled
+            bot.logger.warn(`Could not DM user ${record.user_id} about message approval`);
+        }
+
+    } catch (error) {
+        bot.logger.error('Error handling spam allow:', error);
+        await interaction.reply({
+            content: '❌ An error occurred while processing the approval.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+}
+
+async function handleSpamDelete(interaction, bot, messageId) {
+    try {
+        // Check if user is moderator
+        if (!bot.services?.moderation?.isModerator(interaction.member)) {
+            return interaction.reply({
+                content: '❌ Only moderators can use this action.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Get pending moderation record
+        const pending = await bot.db.query(
+            'SELECT * FROM pending_moderations WHERE message_id = ?',
+            [messageId]
+        );
+
+        if (pending.rows.length === 0) {
+            return interaction.reply({
+                content: '❌ Moderation record not found or already processed.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const record = pending.rows[0];
+
+        // Get and delete the original message
+        const channel = await bot.client.channels.fetch(record.channel_id);
+        try {
+            const message = await channel.messages.fetch(messageId);
+            await message.delete();
+        } catch (error) {
+            // Message might already be deleted
+            bot.logger.warn(`Could not delete message ${messageId}: ${error.message}`);
+        }
+
+        // Remove from pending moderations
+        await bot.db.query('DELETE FROM pending_moderations WHERE message_id = ?', [messageId]);
+
+        // Log as warning (like the old system)
+        if (bot.services?.moderation) {
+            await bot.services.moderation.trackWarning(record.user_id, 'spam', record.reason);
+        }
+
+        // Update the embed to show deleted status
+        const deletedEmbed = interaction.message.embeds[0];
+        const { EmbedBuilder } = await import('discord.js');
+        const updatedEmbed = new EmbedBuilder()
+            .setColor(0xFF0000) // Red
+            .setTitle('🗑️ Message Deleted')
+            .setDescription(`**Reason:** ${record.reason}\n**Action:** Deleted by ${interaction.user}`)
+            .addFields(deletedEmbed.fields);
+
+        await interaction.update({ embeds: [updatedEmbed], components: [] });
+
+        // Notify the user their message was deleted with explanation
+        try {
+            const user = await bot.client.users.fetch(record.user_id);
+            await user.send(
+                `❌ Your message in <#${record.channel_id}> was removed by a moderator.\n\n` +
+                `**Reason:** ${record.reason}\n\n` +
+                `Please review the community guidelines and be mindful of your message content.`
+            );
+        } catch (error) {
+            // User may have DMs disabled, send channel notification
+            try {
+                const notification = await channel.send(
+                    `⚠️ <@${record.user_id}>, your message was removed: **${record.reason}**\n` +
+                    `Please review the community guidelines. This notification will be deleted in 30 seconds.`
+                );
+                setTimeout(() => notification.delete().catch(() => {}), 30000);
+            } catch (channelError) {
+                bot.logger.warn(`Could not notify user ${record.user_id} about message deletion`);
+            }
+        }
+
+    } catch (error) {
+        bot.logger.error('Error handling spam delete:', error);
+        await interaction.reply({
+            content: '❌ An error occurred while processing the deletion.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
 }
 
 async function handleSelectMenu(interaction, bot) {
@@ -762,7 +973,7 @@ async function handleSelectMenu(interaction, bot) {
         
         await interaction.reply({
             content: `${attendees.length} attendees selected. Click "Save Attendance" to confirm.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 }
@@ -832,7 +1043,7 @@ function generateXUrl(handle) {
  */
 function generateIntroductionMessage(data) {
     let message = `👋 Hello everyone!
-I'm ${data.name}
+I'm ${data.name} ${data.discordUsername ? `(Discord: @${data.discordUsername})` : ''}
 
 🌍 From ${data.location}
 
